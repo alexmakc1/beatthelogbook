@@ -776,7 +776,77 @@ export default function WorkoutScreen() {
 
   // Function to handle going back to the main screen
   const handleBack = () => {
-    router.back();
+    // If there's an active workout, confirm before navigating away
+    if (exercises.length > 0) {
+      setShowCancelModal(true);
+    } else {
+      router.back();
+    }
+  };
+
+  // Save the active workout with current timer state
+  const saveActiveWorkoutState = async () => {
+    // If workout has exercises and timer is running, save with timestamp
+    if (exercises.length > 0) {
+      try {
+        // If timer is running, make sure we have a start time
+        if (workoutStarted && !workoutStartTime) {
+          const now = new Date();
+          setWorkoutStartTime(now);
+          await storageService.saveActiveWorkout(exercises, weightUnit, now.toISOString());
+        } else if (workoutStarted && workoutStartTime) {
+          // Timer is running and we have a start time
+          await storageService.saveActiveWorkout(exercises, weightUnit, workoutStartTime.toISOString());
+        } else {
+          // No timer but we have exercises
+          await storageService.saveActiveWorkout(exercises, weightUnit);
+        }
+        
+        console.log('Workout state saved successfully with timestamp');
+      } catch (error) {
+        console.error('Error saving workout state:', error);
+      }
+    }
+  };
+
+  // Use effect to autosave the workout state every minute
+  useEffect(() => {
+    // Set up autosave interval
+    const autosaveInterval = setInterval(() => {
+      if (exercises.length > 0) {
+        saveActiveWorkoutState();
+      }
+    }, 60000); // Save every minute
+    
+    return () => {
+      clearInterval(autosaveInterval);
+    };
+  }, [exercises, workoutStarted, workoutStartTime, weightUnit]);
+
+  // Use effect to save when exercises change
+  useEffect(() => {
+    // Don't save if exercises are empty (e.g., just initialized)
+    if (exercises.length > 0) {
+      saveActiveWorkoutState();
+    }
+  }, [exercises]);
+
+  // Handle back button press
+  useEffect(() => {
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (exercises.length > 0) {
+        setShowCancelModal(true);
+        return true; // Prevent default behavior
+      }
+      return false; // Allow default behavior
+    });
+    
+    return () => backHandler.remove();
+  }, [exercises]);
+  
+  // Continue workout without canceling
+  const continueWorkout = () => {
+    setShowCancelModal(false);
   };
   
   return (
@@ -925,24 +995,44 @@ export default function WorkoutScreen() {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.confirmModalContent}>
-            <Text style={styles.confirmModalTitle}>Cancel Workout?</Text>
+            <Text style={styles.confirmModalTitle}>Workout in Progress</Text>
             <Text style={styles.confirmModalText}>
-              Are you sure you want to cancel this workout? All progress will be lost.
+              What would you like to do with your current workout?
             </Text>
             
-            <View style={styles.confirmButtonRow}>
+            <View style={styles.confirmButtonColumn}>
               <TouchableOpacity 
-                style={styles.cancelConfirmButton}
-                onPress={() => setShowCancelModal(false)}
+                style={styles.continueButton}
+                onPress={continueWorkout}
               >
-                <Text style={styles.cancelConfirmButtonText}>Keep Workout</Text>
+                <Text style={styles.continueButtonText}>Continue Workout</Text>
               </TouchableOpacity>
               
               <TouchableOpacity 
-                style={styles.confirmButton}
+                style={styles.saveButton}
+                onPress={() => {
+                  setShowCancelModal(false);
+                  handleSaveWorkout();
+                }}
+              >
+                <Text style={styles.saveButtonText}>Save and Complete</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.saveExitButton}
+                onPress={() => {
+                  setShowCancelModal(false);
+                  router.back();
+                }}
+              >
+                <Text style={styles.saveExitButtonText}>Save and Exit</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.discardButton}
                 onPress={confirmCancelWorkout}
               >
-                <Text style={styles.confirmButtonText}>Yes, Cancel</Text>
+                <Text style={styles.discardButtonText}>Discard Workout</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1507,19 +1597,13 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
   },
   modalContent: {
     backgroundColor: COLORS.card,
     borderRadius: 10,
     padding: 20,
-    width: '90%',
-    maxHeight: '90%',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 4,
+    width: '85%',
+    maxWidth: 400,
   },
   modalHeader: {
     flexDirection: 'row',
@@ -1831,56 +1915,73 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.card,
     borderRadius: 10,
     padding: 20,
-    width: '90%',
-    alignItems: 'center',
-    shadowColor: COLORS.shadow,
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
+    width: '85%',
+    maxWidth: 400,
   },
   confirmModalTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: 'bold',
-    marginBottom: 15,
+    marginBottom: 10,
     textAlign: 'center',
     color: COLORS.text,
   },
   confirmModalText: {
-    textAlign: 'center',
+    fontSize: 16,
     marginBottom: 20,
+    textAlign: 'center',
     color: COLORS.textSecondary,
   },
-  confirmButtonRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    width: '100%',
+  confirmButtonColumn: {
+    alignItems: 'stretch',
   },
-  cancelConfirmButton: {
-    backgroundColor: COLORS.background,
-    paddingVertical: 12,
-    paddingHorizontal: 15,
+  continueButton: {
+    backgroundColor: COLORS.primary,
+    padding: 15,
     borderRadius: 8,
-    marginRight: 10,
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  continueButtonText: {
+    color: COLORS.card,
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  saveButton: {
+    backgroundColor: COLORS.success,
+    padding: 15,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  saveButtonText: {
+    color: COLORS.card,
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  saveExitButton: {
+    backgroundColor: COLORS.secondary,
+    padding: 15,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  saveExitButtonText: {
+    color: COLORS.card,
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  discardButton: {
+    backgroundColor: '#f8f8f8',
+    padding: 15,
+    borderRadius: 8,
+    alignItems: 'center',
     borderWidth: 1,
     borderColor: COLORS.border,
   },
-  cancelConfirmButtonText: {
-    color: COLORS.textSecondary,
+  discardButtonText: {
+    color: 'red',
     fontWeight: 'bold',
-  },
-  confirmButton: {
-    backgroundColor: COLORS.accent,
-    paddingVertical: 12,
-    paddingHorizontal: 15,
-    borderRadius: 8,
-  },
-  confirmButtonText: {
-    color: COLORS.card,
-    fontWeight: 'bold',
+    fontSize: 16,
   },
   modalSubtitle: {
     fontSize: 14,
@@ -1892,19 +1993,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     width: '100%',
     justifyContent: 'space-between',
-  },
-  discardButton: {
-    backgroundColor: COLORS.background,
-    padding: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-    width: '48%',
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  discardButtonText: {
-    color: COLORS.textSecondary,
-    fontWeight: 'bold',
   },
   resumeButton: {
     backgroundColor: COLORS.primary,
