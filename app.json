@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "workout-tracker",
-    "slug": "workout-tracker",
+    "name": "Beat The Logbook",
+    "slug": "beat-the-logbook",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -36,6 +36,20 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "0ed13d50-a42a-48c0-82d4-4107ece6a05e"
+      }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/0ed13d50-a42a-48c0-82d4-4107ece6a05e"
     }
   }
 }
