@@ -297,14 +297,8 @@ export default function WorkoutDetailsScreen() {
               onPress={() => navigateToExerciseHistory(exercise.name)}
               style={styles.exerciseNameContainer}
             >
-              <View style={styles.exerciseNameWrapper}>
-                <Text style={styles.exerciseName} numberOfLines={2} ellipsizeMode="tail">
-                  {exercise.name}
-                </Text>
-              </View>
-              <View style={styles.viewHistoryWrapper}>
-                <Text style={styles.viewHistoryText}>View History →</Text>
-              </View>
+              <Text style={styles.exerciseName}>{exercise.name}</Text>
+              <Text style={styles.viewHistoryText}>View History →</Text>
             </TouchableOpacity>
             
             <View style={styles.setsContainer}>
@@ -533,25 +527,12 @@ const styles = StyleSheet.create({
     marginBottom: 15,
     flexWrap: 'wrap',
   },
-  exerciseNameWrapper: {
-    flex: 1,
-    marginRight: 10,
-  },
   exerciseName: {
     fontSize: 18,
     fontWeight: 'bold',
     color: COLORS.text,
-  },
-  viewHistoryWrapper: {
-    minWidth: 80,
-    justifyContent: 'center',
-  },
-  viewHistoryText: {
-    fontSize: 14,
-    color: COLORS.primary,
-    fontWeight: '500',
-    paddingVertical: 5,
-    textAlign: 'right',
+    flex: 1,
+    marginRight: 10,
   },
   setsContainer: {
     marginTop: 5,
@@ -726,5 +707,11 @@ const styles = StyleSheet.create({
     marginBottom: 5,
     marginTop: 10,
     color: COLORS.text,
+  },
+  viewHistoryText: {
+    fontSize: 14,
+    color: COLORS.primary,
+    fontWeight: '500',
+    paddingVertical: 5,
   },
 }); 

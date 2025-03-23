@@ -986,9 +986,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: Platform.OS === 'ios' ? 50 : 16,
     paddingBottom: 8,
-    backgroundColor: '#fff',
+    backgroundColor: COLORS.primary,
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    borderBottomColor: COLORS.border,
   },
   backButton: {
     padding: 8,
@@ -998,7 +998,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     flex: 1,
     textAlign: 'center',
-    color: COLORS.text,
+    color: COLORS.card,
   },
   headerRight: {
     width: 40,

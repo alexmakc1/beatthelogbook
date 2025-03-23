@@ -30,7 +30,33 @@ const parseDuration = (durationStr: string): number => {
 
 // Convert a Strong CSV date string to ISO format
 const formatDate = (dateStr: string): string => {
-  return new Date(dateStr).toISOString();
+  try {
+    // First check if it's a valid date string
+    const date = new Date(dateStr);
+    if (!isNaN(date.getTime())) {
+      return date.toISOString();
+    }
+    
+    // If not, try to parse it manually (format: YYYY-MM-DD HH:MM:SS)
+    const [datePart, timePart] = dateStr.split(' ');
+    if (datePart && timePart) {
+      const [year, month, day] = datePart.split('-').map(Number);
+      const [hour, minute, second] = timePart.split(':').map(Number);
+      
+      // Month is 0-indexed in JavaScript Date
+      const parsedDate = new Date(year, month - 1, day, hour, minute, second);
+      if (!isNaN(parsedDate.getTime())) {
+        return parsedDate.toISOString();
+      }
+    }
+    
+    // Fall back to current date if parsing fails
+    console.warn(`Could not parse date: ${dateStr}, using current date instead`);
+    return new Date().toISOString();
+  } catch (error) {
+    console.error(`Error formatting date: ${dateStr}`, error);
+    return new Date().toISOString();
+  }
 };
 
 // Parse CSV data
@@ -131,14 +157,17 @@ const convertToAppWorkout = async (
   // Convert exercises map to array
   const exercises = Array.from(exercisesMap.values());
   
+  // Format the date
+  const formattedDate = formatDate(firstRow.Date);
+  
   // Create the workout
   const workout: Workout = {
     id: Date.now() + Math.random().toString(36).substring(2, 9),
-    date: formatDate(firstRow.Date),
+    date: formattedDate,
     exercises,
-    startTime: formatDate(firstRow.Date),
+    startTime: formattedDate,
     duration: parseDuration(firstRow.Duration),
-    weightUnit
+    weightUnit: 'lbs' // Always set to lbs (standardized)
   };
   
   return workout;

@@ -269,8 +269,7 @@ export default function WorkoutScreen() {
         }
         
         // Handle weight unit - if different from current, ask if user wants to convert
-        if (activeWorkout.weightUnit && 
-            activeWorkout.weightUnit.toLowerCase() !== weightUnit.toLowerCase()) {
+        if (activeWorkout.weightUnit && activeWorkout.weightUnit !== weightUnit) {
           console.log("Weight unit mismatch:", activeWorkout.weightUnit, "vs", weightUnit);
           Alert.alert(
             'Weight Unit Mismatch',
@@ -288,8 +287,8 @@ export default function WorkoutScreen() {
                       if (numWeight > 0) {
                         const convertedWeight = settingsService.convertWeight(
                           numWeight, 
-                          activeWorkout.weightUnit.toLowerCase() as settingsService.WeightUnit, 
-                          weightUnit.toLowerCase() as settingsService.WeightUnit
+                          activeWorkout.weightUnit as settingsService.WeightUnit, 
+                          weightUnit
                         );
                         return { ...set, weight: convertedWeight.toString() };
                       }

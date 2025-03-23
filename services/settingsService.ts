@@ -125,9 +125,7 @@ export const getWeightUnit = async (): Promise<WeightUnit> => {
 
 export const setWeightUnit = async (unit: WeightUnit): Promise<void> => {
   try {
-    // Always store in lowercase for consistency
-    const normalizedUnit = unit.toLowerCase() as WeightUnit;
-    await AsyncStorage.setItem(WEIGHT_UNIT_KEY, normalizedUnit);
+    await AsyncStorage.setItem(WEIGHT_UNIT_KEY, unit);
   } catch (error) {
     console.error('Error setting weight unit:', error);
   }
