@@ -442,8 +442,7 @@ export default function HomeScreen() {
           <TouchableOpacity 
             style={[styles.button, { backgroundColor: COLORS.success }]}
             onPress={() => {
-              // @ts-ignore - Suppressing type error for navigation path
-              router.push("workout");
+              router.push('/workout');
             }}
           >
             <View style={styles.buttonContent}>
@@ -455,8 +454,7 @@ export default function HomeScreen() {
           <TouchableOpacity 
             style={[styles.button, { backgroundColor: COLORS.primary }]}
             onPress={() => {
-              // @ts-ignore - Suppressing type error for navigation path
-              router.push("templates");
+              router.push('/templates');
             }}
           >
             <View style={styles.buttonContent}>
@@ -468,8 +466,7 @@ export default function HomeScreen() {
           <TouchableOpacity 
             style={[styles.button, { backgroundColor: COLORS.primaryDark }]}
             onPress={() => {
-              // @ts-ignore - Suppressing type error for navigation path
-              router.push("history");
+              router.push('/history');
             }}
           >
             <View style={styles.buttonContent}>
@@ -481,13 +478,24 @@ export default function HomeScreen() {
           <TouchableOpacity 
             style={[styles.button, { backgroundColor: COLORS.secondary }]}
             onPress={() => {
-              // @ts-ignore - Suppressing type error for navigation path
-              router.push("exercise-history");
+              router.push('/exercise-history');
             }}
           >
             <View style={styles.buttonContent}>
               <Ionicons name="stats-chart-outline" size={22} color={COLORS.card} style={styles.buttonIcon} />
               <Text style={styles.buttonText}>Exercise History & Stats</Text>
+            </View>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={[styles.button, { backgroundColor: '#00C853' }]}
+            onPress={() => {
+              router.push('/nutrition');
+            }}
+          >
+            <View style={styles.buttonContent}>
+              <Ionicons name="nutrition-outline" size={22} color={COLORS.card} style={styles.buttonIcon} />
+              <Text style={styles.buttonText}>Nutrition Tracker</Text>
             </View>
           </TouchableOpacity>
         </View>
