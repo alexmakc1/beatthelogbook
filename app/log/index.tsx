@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, Button, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
+import { COLORS } from '../../services/colors';
 
 export default function LogScreen() {
   const router = useRouter();
@@ -13,12 +14,13 @@ export default function LogScreen() {
       <Button
         title="Go Back to Workout"
         onPress={() => router.back()}
-        color="#666"
+        color={COLORS.secondary}
       />
       
       <Button
         title="Go to Home"
         onPress={() => router.push('/')}
+        color={COLORS.primary}
       />
     </View>
   );
@@ -30,15 +32,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
+    backgroundColor: COLORS.background,
   },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
     marginBottom: 10,
+    color: COLORS.text,
   },
   subtitle: {
     fontSize: 16,
     marginBottom: 20,
-    color: '#555',
+    color: COLORS.textSecondary,
   }
 }); 

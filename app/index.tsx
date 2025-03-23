@@ -20,6 +20,7 @@ import * as FileSystem from 'expo-file-system';
 import * as DocumentPicker from 'expo-document-picker';
 import { Ionicons } from '@expo/vector-icons';
 import * as importService from '../services/importService';
+import { COLORS } from '../services/colors';
 
 // Custom slider component interface
 interface SimpleSliderProps {
@@ -39,8 +40,8 @@ const SimpleSlider = ({
   maximumValue, 
   onValueChange,
   step = 1,
-  minimumTrackColor = "#4CAF50",
-  maximumTrackColor = "#ddd"
+  minimumTrackColor = COLORS.primary,
+  maximumTrackColor = COLORS.border
 }: SimpleSliderProps) => {
   const [sliderWidth, setSliderWidth] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
@@ -428,7 +429,9 @@ export default function HomeScreen() {
         ]}
         onPress={() => setShowSettingsModal(true)}
       >
-        <Ionicons name="settings-outline" size={24} color="#333" />
+        <View style={styles.settingsButtonInner}>
+          <Ionicons name="settings-outline" size={22} color={COLORS.card} />
+        </View>
       </TouchableOpacity>
 
       <View style={styles.header}>
@@ -437,43 +440,55 @@ export default function HomeScreen() {
         
         <View style={styles.buttonsContainer}>
           <TouchableOpacity 
-            style={[styles.button, { backgroundColor: '#4CAF50' }]}
+            style={[styles.button, { backgroundColor: COLORS.success }]}
             onPress={() => {
               // @ts-ignore - Suppressing type error for navigation path
               router.push("workout");
             }}
           >
-            <Text style={styles.buttonText}>Start Workout</Text>
+            <View style={styles.buttonContent}>
+              <Ionicons name="fitness-outline" size={22} color={COLORS.card} style={styles.buttonIcon} />
+              <Text style={styles.buttonText}>Start Workout</Text>
+            </View>
           </TouchableOpacity>
           
           <TouchableOpacity 
-            style={[styles.button, { backgroundColor: '#FF9800' }]}
+            style={[styles.button, { backgroundColor: COLORS.primary }]}
             onPress={() => {
               // @ts-ignore - Suppressing type error for navigation path
               router.push("templates");
             }}
           >
-            <Text style={styles.buttonText}>Workout Templates</Text>
+            <View style={styles.buttonContent}>
+              <Ionicons name="copy-outline" size={22} color={COLORS.card} style={styles.buttonIcon} />
+              <Text style={styles.buttonText}>Workout Templates</Text>
+            </View>
           </TouchableOpacity>
           
           <TouchableOpacity 
-            style={[styles.button, { backgroundColor: '#2196F3' }]}
+            style={[styles.button, { backgroundColor: COLORS.primaryDark }]}
             onPress={() => {
               // @ts-ignore - Suppressing type error for navigation path
               router.push("history");
             }}
           >
-            <Text style={styles.buttonText}>View Workout History</Text>
+            <View style={styles.buttonContent}>
+              <Ionicons name="time-outline" size={22} color={COLORS.card} style={styles.buttonIcon} />
+              <Text style={styles.buttonText}>View Workout History</Text>
+            </View>
           </TouchableOpacity>
           
           <TouchableOpacity 
-            style={[styles.button, { backgroundColor: '#9C27B0' }]}
+            style={[styles.button, { backgroundColor: COLORS.secondary }]}
             onPress={() => {
               // @ts-ignore - Suppressing type error for navigation path
               router.push("exercise-history");
             }}
           >
-            <Text style={styles.buttonText}>Exercise History & Stats</Text>
+            <View style={styles.buttonContent}>
+              <Ionicons name="stats-chart-outline" size={22} color={COLORS.card} style={styles.buttonIcon} />
+              <Text style={styles.buttonText}>Exercise History & Stats</Text>
+            </View>
           </TouchableOpacity>
         </View>
       </View>
@@ -533,15 +548,15 @@ export default function HomeScreen() {
             </Text>
             
             {/* Only show Apple Health sync option on iOS (not on web) */}
-            {Platform.OS === 'ios' && Platform.OS !== 'web' && (
+            {Platform.OS === 'ios' && (
               <>
                 <View style={styles.settingRow}>
                   <Text style={styles.settingLabel}>Sync with Apple Health</Text>
                   <Switch
                     value={healthSyncEnabled}
                     onValueChange={setHealthSyncEnabled}
-                    trackColor={{ false: '#767577', true: '#4CAF50' }}
-                    thumbColor="#f4f3f4"
+                    trackColor={{ false: COLORS.border, true: COLORS.primary }}
+                    thumbColor={COLORS.card}
                   />
                 </View>
                 <Text style={styles.settingDescription}>
@@ -578,7 +593,7 @@ export default function HomeScreen() {
                 disabled={importLoading}
               >
                 {importLoading ? (
-                  <ActivityIndicator size="small" color="#4CAF50" />
+                  <ActivityIndicator size="small" color={COLORS.success} />
                 ) : (
                   <Text style={styles.importDataButtonText}>Import from CSV</Text>
                 )}
@@ -602,7 +617,7 @@ export default function HomeScreen() {
                 disabled={savingSettings}
               >
                 {savingSettings ? (
-                  <ActivityIndicator size="small" color="white" />
+                  <ActivityIndicator size="small" color={COLORS.card} />
                 ) : (
                   <Text style={styles.saveButtonText}>Save</Text>
                 )}
@@ -618,70 +633,70 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: COLORS.background,
+    padding: 20,
+    paddingTop: Platform.OS === 'ios' ? 60 : 40,
   },
   header: {
-    flex: 1,
-    justifyContent: 'center',
+    marginTop: 30,
+    marginBottom: 40,
     alignItems: 'center',
-    paddingHorizontal: 20,
-  },
-  settingsButton: {
-    position: 'absolute',
-    top: Platform.OS === 'ios' ? 60 : 30,
-    right: 20,
-    zIndex: 10,
-    padding: 8,
-  },
-  settingsButtonWithBar: {
-    top: Platform.OS === 'ios' ? 100 : 70,
   },
   title: {
-    fontSize: 28,
+    fontSize: 32,
     fontWeight: 'bold',
-    marginBottom: 10,
+    color: COLORS.primary,
     textAlign: 'center',
   },
   subtitle: {
-    fontSize: 16,
-    color: '#666',
-    marginBottom: 40,
+    fontSize: 18,
+    color: COLORS.textSecondary,
+    marginTop: 8,
     textAlign: 'center',
+    marginBottom: 30,
   },
   buttonsContainer: {
     width: '100%',
-    maxWidth: 300,
+    maxWidth: 340,
+    alignSelf: 'center',
+    marginTop: 10,
   },
   button: {
-    padding: 15,
-    borderRadius: 8,
+    padding: 16,
+    borderRadius: 10,
     alignItems: 'center',
-    marginBottom: 10,
-    shadowColor: '#000',
+    marginBottom: 15,
+    shadowColor: COLORS.shadow,
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.2,
     shadowRadius: 4,
-    elevation: 3,
+    elevation: 4,
+  },
+  buttonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  buttonIcon: {
+    marginRight: 10,
   },
   buttonText: {
-    color: 'white',
+    color: COLORS.card,
     fontWeight: 'bold',
-    fontSize: 16,
+    fontSize: 17,
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: `${COLORS.shadow.slice(0, -4)}0.5)`,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
   },
   modalContent: {
-    backgroundColor: 'white',
+    backgroundColor: COLORS.card,
     borderRadius: 10,
     padding: 20,
     width: '100%',
     maxWidth: 400,
-    shadowColor: '#000',
+    shadowColor: COLORS.shadow,
     shadowOffset: {
       width: 0,
       height: 2,
@@ -695,6 +710,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginBottom: 20,
     textAlign: 'center',
+    color: COLORS.text,
   },
   settingRow: {
     flexDirection: 'row',
@@ -705,17 +721,20 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     marginRight: 10,
+    color: COLORS.text,
   },
   settingInput: {
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: COLORS.border,
     borderRadius: 5,
     padding: 10,
     fontSize: 16,
+    backgroundColor: COLORS.card,
+    color: COLORS.text,
   },
   settingDescription: {
     fontSize: 12,
-    color: '#666',
+    color: COLORS.textSecondary,
     fontStyle: 'italic',
   },
   modalButtons: {
@@ -724,27 +743,29 @@ const styles = StyleSheet.create({
     marginTop: 20,
   },
   cancelButton: {
-    backgroundColor: '#f44336',
+    backgroundColor: COLORS.background,
     paddingVertical: 12,
     paddingHorizontal: 20,
     borderRadius: 5,
     flex: 1,
     marginRight: 10,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
   cancelButtonText: {
-    color: 'white',
+    color: COLORS.textSecondary,
     fontWeight: 'bold',
     textAlign: 'center',
   },
   saveButton: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: COLORS.primary,
     paddingVertical: 12,
     paddingHorizontal: 20,
     borderRadius: 5,
     flex: 1,
   },
   saveButtonText: {
-    color: 'white',
+    color: COLORS.card,
     fontWeight: 'bold',
     textAlign: 'center',
   },
@@ -758,7 +779,7 @@ const styles = StyleSheet.create({
   sliderTrack: {
     height: 4,
     borderRadius: 2,
-    backgroundColor: '#ddd',
+    backgroundColor: COLORS.border,
     flexDirection: 'row',
     position: 'relative',
   },
@@ -780,12 +801,12 @@ const styles = StyleSheet.create({
     width: 20,
     height: 20,
     borderRadius: 10,
-    backgroundColor: '#4CAF50',
+    backgroundColor: COLORS.primary,
     position: 'absolute',
     top: 10,
     marginTop: -10,
     elevation: 3,
-    shadowColor: '#000',
+    shadowColor: COLORS.shadow,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 2,
@@ -802,19 +823,19 @@ const styles = StyleSheet.create({
   unitToggleButton: {
     padding: 10,
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: COLORS.border,
     borderRadius: 5,
-    backgroundColor: '#f0f0f0',
+    backgroundColor: COLORS.card,
     minWidth: 60,
     alignItems: 'center',
   },
   unitToggleText: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#4CAF50',
+    color: COLORS.text,
   },
   activeWorkoutBar: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: COLORS.success,
     paddingVertical: 10,
     paddingHorizontal: 20,
     flexDirection: 'row',
@@ -827,32 +848,52 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   activeWorkoutText: {
-    color: 'white',
+    color: COLORS.card,
     fontWeight: 'bold',
     fontSize: 16,
     marginLeft: 5,
   },
   continueText: {
-    color: 'white',
+    color: COLORS.card,
     fontSize: 14,
   },
   divider: {
     height: 1,
-    backgroundColor: '#ddd',
+    backgroundColor: COLORS.border,
     marginVertical: 10,
   },
   importDataButton: {
     padding: 10,
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: COLORS.border,
     borderRadius: 5,
-    backgroundColor: '#f0f0f0',
+    backgroundColor: COLORS.card,
     minWidth: 60,
     alignItems: 'center',
   },
   importDataButtonText: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#4CAF50',
+    color: COLORS.primary,
+  },
+  settingsButton: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 60 : 30,
+    right: 20,
+    zIndex: 10,
+    padding: 8,
+    backgroundColor: COLORS.primary,
+    borderRadius: 30,
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 3,
+  },
+  settingsButtonInner: {
+    padding: 6,
+  },
+  settingsButtonWithBar: {
+    top: Platform.OS === 'ios' ? 100 : 70,
   },
 });

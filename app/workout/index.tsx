@@ -15,9 +15,11 @@ import {
   Platform,
   BackHandler
 } from 'react-native';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import * as storageService from '../../services/storageService';
 import * as settingsService from '../../services/settingsService';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { COLORS } from '../../services/colors';
 
 // Generate a unique ID
 const generateId = () => {
@@ -32,6 +34,7 @@ interface ExerciseSet {
   id: string;
   reps: string;
   weight: string;
+  unit?: string;
 }
 
 interface BestPerformance {
@@ -45,6 +48,37 @@ interface BestPerformance {
   weightUnit: string;
 }
 
+// Define interface for exercise stats
+interface WorkoutStat {
+  id: string;
+  date: string;
+  sets: ExerciseSet[];
+  weightUnit?: string;
+}
+
+interface BestSet {
+  reps: number;
+  weight: number;
+  unit?: string;
+}
+
+interface PersonalBest {
+  weight: number;
+  reps: number;
+  date?: string;
+  unit?: string;
+}
+
+interface ExerciseStats {
+  bestSet?: BestSet;
+  bestSetDate?: string;
+  estimatedOneRepMax?: number;
+  personalBests?: {
+    [key: string]: PersonalBest;
+  };
+  workouts?: WorkoutStat[];
+}
+
 export default function WorkoutScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ exercises?: string, restore?: string }>();
@@ -53,7 +87,7 @@ export default function WorkoutScreen() {
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedExercise, setSelectedExercise] = useState('');
-  const [exerciseStats, setExerciseStats] = useState<any[]>([]);
+  const [exerciseStats, setExerciseStats] = useState<ExerciseStats | null>(null);
   const [showStatsModal, setShowStatsModal] = useState(false);
   const [hasActiveWorkout, setHasActiveWorkout] = useState(false);
   const [showRestoreModal, setShowRestoreModal] = useState(false);
@@ -68,16 +102,25 @@ export default function WorkoutScreen() {
   const [historyDays, setHistoryDays] = useState(settingsService.DEFAULT_HISTORY_DAYS);
   const [suggestedReps, setSuggestedReps] = useState(settingsService.DEFAULT_SUGGESTED_REPS);
   const [weightUnit, setWeightUnit] = useState<settingsService.WeightUnit>(settingsService.DEFAULT_WEIGHT_UNIT);
+  const [forceRefreshKey, setForceRefreshKey] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<'history' | 'best' | 'suggested'>('history');
 
   // Save active workout when exercises change
   useEffect(() => {
-    storageService.saveActiveWorkout(exercises, weightUnit).catch(error => {
-      console.error('Error saving active workout:', error);
-    });
-    
-    // Start timer when exercises are added
-    if (exercises.length > 0 && !workoutStarted) {
-      startWorkoutTimer();
+    if (exercises.length > 0) {
+      console.log("Saving active workout from exercises change useEffect");
+      // Use timestamp from state if available
+      const timestamp = workoutStartTime ? workoutStartTime.toISOString() : new Date().toISOString();
+      storageService.saveActiveWorkout(exercises, weightUnit, timestamp).catch(error => {
+        console.error('Error saving active workout:', error);
+      });
+      
+      // Start timer when exercises are added and timer not running
+      if (!workoutStarted) {
+        console.log("Starting timer from exercises change useEffect");
+        startWorkoutTimer();
+      }
     }
   }, [exercises, weightUnit]);
   
@@ -107,15 +150,21 @@ export default function WorkoutScreen() {
   // Check for active workout when the component mounts
   useEffect(() => {
     const checkActiveWorkout = async () => {
+      console.log("Checking for active workout, restore param:", params.restore);
       try {
         const activeWorkout = await storageService.getActiveWorkout();
-        if (activeWorkout && activeWorkout.exercises.length > 0) {
+        console.log("Active workout check result:", 
+          activeWorkout ? `Found with ${activeWorkout.exercises?.length || 0} exercises` : "Not found");
+        
+        if (activeWorkout && activeWorkout.exercises && activeWorkout.exercises.length > 0) {
           setHasActiveWorkout(true);
           
           // If we were directed here from the active workout bar, auto-restore
           if (params.restore === 'true') {
+            console.log("Auto-restoring workout from bar click");
             restoreActiveWorkout();
           } else {
+            console.log("Showing restore modal");
             setShowRestoreModal(true);
           }
         }
@@ -127,17 +176,74 @@ export default function WorkoutScreen() {
     // Only check for active workout if not loading from template
     if (!params.exercises) {
       checkActiveWorkout();
+    } else {
+      console.log("Loading from template, not checking active workout");
     }
   }, [params.exercises, params.restore]);
 
+  // Start workout timer with more safeguards
+  const startWorkoutTimer = () => {
+    console.log("Starting workout timer", { 
+      workoutStarted, 
+      hasTimer: !!timerIntervalRef.current, 
+      existingStartTime: workoutStartTime?.toISOString() 
+    });
+    
+    // Clear any existing timer
+    if (timerIntervalRef.current) {
+      console.log("Clearing existing timer");
+      clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = null;
+    }
+    
+    // Create start time if not already set
+    let startTime = workoutStartTime;
+    if (!startTime) {
+      console.log("Creating new start time");
+      startTime = new Date();
+      setWorkoutStartTime(startTime);
+      setElapsedTime(0);
+    } else {
+      console.log("Using existing start time", startTime.toISOString());
+      // Calculate elapsed time from existing start time
+      const now = new Date();
+      const initialElapsed = Math.floor((now.getTime() - startTime.getTime()) / 1000);
+      setElapsedTime(initialElapsed);
+    }
+    
+    // Start the timer
+    setWorkoutStarted(true);
+    
+    // Create a new timer interval
+    console.log("Creating new timer interval");
+    timerIntervalRef.current = setInterval(() => {
+      setElapsedTime(prev => prev + 1);
+    }, 1000);
+    
+    // Update state in storage with timestamp
+    if (exercises.length > 0) {
+      console.log("Saving active workout with timestamp", startTime.toISOString());
+      storageService.saveActiveWorkout(exercises, weightUnit, startTime.toISOString());
+    }
+  };
+
   // Restore active workout
   const restoreActiveWorkout = async () => {
+    console.log("Starting workout restoration");
     try {
       setRestoringWorkout(true);
       const activeWorkout = await storageService.getActiveWorkout();
-      if (activeWorkout) {
+      console.log("Active workout to restore:", 
+        activeWorkout ? `Found with ${activeWorkout.exercises?.length || 0} exercises` : "Not found");
+      
+      if (activeWorkout && activeWorkout.exercises && activeWorkout.exercises.length > 0) {
+        // First, set exercises to ensure they're loaded even if other parts fail
+        console.log("Setting exercises from active workout");
+        setExercises(activeWorkout.exercises);
+        
         // Also restore the timer state if we have timestamp
         if (activeWorkout.timestamp) {
+          console.log("Restoring timer state from timestamp:", activeWorkout.timestamp);
           const startTime = new Date(activeWorkout.timestamp);
           setWorkoutStartTime(startTime);
           setWorkoutStarted(true);
@@ -148,6 +254,7 @@ export default function WorkoutScreen() {
           setElapsedTime(initialElapsed);
           
           // Start the timer
+          console.log("Starting timer for restored workout");
           if (timerIntervalRef.current) {
             clearInterval(timerIntervalRef.current);
           }
@@ -155,12 +262,15 @@ export default function WorkoutScreen() {
           timerIntervalRef.current = setInterval(() => {
             setElapsedTime(prev => prev + 1);
           }, 1000);
+        } else {
+          // If no timestamp, still start the timer for the restored workout
+          console.log("No timestamp found, starting new timer for restored workout");
+          startWorkoutTimer();
         }
         
-        setExercises(activeWorkout.exercises);
-        
         // Handle weight unit - if different from current, ask if user wants to convert
-        if (activeWorkout.weightUnit !== weightUnit) {
+        if (activeWorkout.weightUnit && activeWorkout.weightUnit !== weightUnit) {
+          console.log("Weight unit mismatch:", activeWorkout.weightUnit, "vs", weightUnit);
           Alert.alert(
             'Weight Unit Mismatch',
             `This workout was created using ${activeWorkout.weightUnit.toUpperCase()}. Your current setting is ${weightUnit.toUpperCase()}. Would you like to convert the weights?`,
@@ -169,6 +279,7 @@ export default function WorkoutScreen() {
                 text: 'Convert',
                 onPress: () => {
                   // Convert weights from saved unit to current unit
+                  console.log("Converting weights between units");
                   const convertedExercises = activeWorkout.exercises.map(exercise => ({
                     ...exercise,
                     sets: exercise.sets.map(set => {
@@ -185,21 +296,40 @@ export default function WorkoutScreen() {
                     })
                   }));
                   setExercises(convertedExercises);
+                  
+                  // Save the workout with new units
+                  storageService.saveActiveWorkout(convertedExercises, weightUnit, activeWorkout.timestamp);
                 }
               },
               {
                 text: 'Keep Original',
                 onPress: () => {
                   // Just set as is without conversion
+                  console.log("Keeping original weight units");
                   setExercises(activeWorkout.exercises);
+                  // Save with the original timestamp to keep consistency
+                  storageService.saveActiveWorkout(activeWorkout.exercises, weightUnit, activeWorkout.timestamp);
                 }
               }
             ]
           );
         }
+      } else {
+        // If no active workout or empty exercises, show a message
+        console.warn('No active workout found or workout has no exercises');
+        Alert.alert(
+          'No Active Workout',
+          'No active workout was found or the workout has no exercises.',
+          [{ text: 'OK' }]
+        );
       }
     } catch (error) {
       console.error('Error restoring active workout:', error);
+      Alert.alert(
+        'Error',
+        'Failed to restore the active workout. Please try again.',
+        [{ text: 'OK' }]
+      );
     } finally {
       setRestoringWorkout(false);
       setShowRestoreModal(false);
@@ -344,33 +474,6 @@ export default function WorkoutScreen() {
     };
   }, []);
 
-  // Make sure startWorkoutTimer doesn't depend on workoutStarted
-  const startWorkoutTimer = () => {
-    // Initialize workout time if not already started
-    if (!workoutStarted) {
-      const startTime = new Date();
-      setWorkoutStartTime(startTime);
-      setWorkoutStarted(true);
-      setElapsedTime(0);
-    }
-    
-    // Clear any existing interval
-    if (timerIntervalRef.current) {
-      clearInterval(timerIntervalRef.current);
-    }
-    
-    // Set interval to update timer every second
-    timerIntervalRef.current = setInterval(() => {
-      setElapsedTime(prev => {
-        if (workoutStartTime) {
-          const now = new Date();
-          return Math.floor((now.getTime() - workoutStartTime.getTime()) / 1000);
-        }
-        return prev + 1; // Fallback increment if workoutStartTime is null
-      });
-    }, 1000);
-  };
-
   // Handle workflow cancel with confirmation
   const handleCancelWorkout = () => {
     setShowCancelModal(true);
@@ -513,14 +616,21 @@ export default function WorkoutScreen() {
   // View exercise history - updated to match exercise history page
   const viewExerciseHistory = async (exerciseName: string) => {
     setSelectedExercise(exerciseName);
+    setLoading(true);
+    
+    console.log(`Loading exercise history for: ${exerciseName}`);
     
     try {
       // Get exercise stats from workouts
-      const stats = await storageService.getExerciseStatsByWorkout(exerciseName, historyDays);
-      setExerciseStats(stats);
+      const workoutStats = await storageService.getExerciseStatsByWorkout(exerciseName, historyDays);
+      console.log(`Found ${workoutStats.length} workout stats`);
       
       // Get best performance (highest volume)
       const best = await storageService.getBestPerformance(exerciseName, historyDays);
+      console.log('Best performance:', best ? 'Found' : 'None found');
+      
+      // Create new exerciseStats object with the same structure as the main exercise history page
+      const stats: ExerciseStats = { workouts: workoutStats };
       
       if (best) {
         // Ensure weightUnit has a default value
@@ -529,14 +639,51 @@ export default function WorkoutScreen() {
           weightUnit: best.weightUnit || 'kg'
         };
         setBestPerformance(bestWithWeightUnit);
+        
+        // Add best set to stats
+        stats.bestSet = {
+          reps: parseFloat(best.reps),
+          weight: parseFloat(best.weight),
+          unit: best.weightUnit || 'kg'
+        };
+        stats.bestSetDate = best.date;
+        
+        // Calculate estimated 1RM
+        const oneRepMax = calculateOneRepMax(parseFloat(best.weight), parseFloat(best.reps));
+        stats.estimatedOneRepMax = oneRepMax;
+        
+        // Process personal bests by rep ranges
+        const personalBests: { [key: string]: PersonalBest } = {};
+        for (const workout of workoutStats) {
+          for (const set of workout.sets) {
+            const reps = set.reps;
+            const weight = parseFloat(set.weight);
+            
+            if (!personalBests[reps] || weight > personalBests[reps].weight) {
+              personalBests[reps] = {
+                weight: weight,
+                reps: parseFloat(reps),
+                date: workout.date,
+                unit: workout.weightUnit || 'kg'
+              };
+            }
+          }
+        }
+        stats.personalBests = personalBests;
       } else {
         setBestPerformance(null);
       }
       
+      // Set the exerciseStats state with our properly structured data
+      setExerciseStats(stats);
+      
+      // Show the modal
       setShowStatsModal(true);
     } catch (error) {
       console.error('Error getting exercise stats:', error);
       Alert.alert('Error', 'Failed to load exercise history');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -552,9 +699,83 @@ export default function WorkoutScreen() {
     const date = new Date(dateString);
     return date.toLocaleDateString();
   };
-  
+
+  // Use focus effect to force reload the workout when screen is focused
+  useFocusEffect(
+    useCallback(() => {
+      console.log("Screen focused, checking if restore needed");
+      if (params.restore === 'true') {
+        console.log("Force restoring workout from focus effect");
+        forceRestoreWorkout();
+      }
+      
+      return () => {
+        // Cleanup on unfocus if needed
+      };
+    }, [params.restore])
+  );
+
+  // Force restore the active workout regardless of current state
+  const forceRestoreWorkout = async () => {
+    console.log("Force restoring workout");
+    try {
+      const activeWorkout = await storageService.getActiveWorkout();
+      console.log("Force restore: active workout found:", 
+        activeWorkout ? `Found with ${activeWorkout.exercises?.length || 0} exercises` : "Not found");
+      
+      if (activeWorkout && activeWorkout.exercises && activeWorkout.exercises.length > 0) {
+        // First reset all related state
+        if (timerIntervalRef.current) {
+          clearInterval(timerIntervalRef.current);
+          timerIntervalRef.current = null;
+        }
+        
+        // Set exercises from active workout
+        setExercises(activeWorkout.exercises);
+        
+        // Restore timer state
+        if (activeWorkout.timestamp) {
+          console.log("Force restore: Setting timer from timestamp:", activeWorkout.timestamp);
+          const startTime = new Date(activeWorkout.timestamp);
+          setWorkoutStartTime(startTime);
+          setWorkoutStarted(true);
+          
+          // Calculate elapsed time
+          const now = new Date();
+          const initialElapsed = Math.floor((now.getTime() - startTime.getTime()) / 1000);
+          setElapsedTime(initialElapsed);
+          
+          // Start a new timer
+          timerIntervalRef.current = setInterval(() => {
+            setElapsedTime(prev => prev + 1);
+          }, 1000);
+        } else {
+          // Start a new timer if no timestamp
+          const now = new Date();
+          setWorkoutStartTime(now);
+          setWorkoutStarted(true);
+          setElapsedTime(0);
+          
+          timerIntervalRef.current = setInterval(() => {
+            setElapsedTime(prev => prev + 1);
+          }, 1000);
+          
+          // Save with the new timestamp
+          storageService.saveActiveWorkout(activeWorkout.exercises, weightUnit, now.toISOString());
+        }
+        
+        // Force a re-render by changing the key
+        setForceRefreshKey(prev => prev + 1);
+      } else {
+        console.warn('No active workout found to force restore');
+      }
+    } catch (error) {
+      console.error('Error force restoring workout:', error);
+    }
+  };
+
   return (
-    <View style={styles.container}>
+    <View style={styles.container} key={`workout-container-${forceRefreshKey}`}>
       <ScrollView contentContainerStyle={styles.contentContainer}>
         <Text style={styles.title}>Workout Session</Text>
         
@@ -763,159 +984,279 @@ export default function WorkoutScreen() {
         onRequestClose={() => setShowStatsModal(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>
-              {selectedExercise} History
-            </Text>
+          <View style={[styles.modalContent, { maxHeight: '90%', height: '90%' }]}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                {selectedExercise}
+              </Text>
+              <TouchableOpacity 
+                style={styles.closeButton}
+                onPress={() => setShowStatsModal(false)}
+              >
+                <Ionicons name="close" size={24} color="#fff" />
+              </TouchableOpacity>
+            </View>
             
-            {/* Best Performance Section with 1RM */}
-            {bestPerformance ? (
-              <View style={styles.bestPerformanceContainer}>
-                <Text style={styles.bestPerformanceTitle}>Best Performance</Text>
-                <Text style={styles.bestPerformanceDate}>
-                  {formatDate(bestPerformance.date)}
-                </Text>
-                
-                <View style={styles.bestPerformanceTable}>
-                  <View style={styles.bestPerformanceTableHeader}>
-                    <Text style={styles.bestPerformanceHeaderCell}>Set</Text>
-                    <Text style={styles.bestPerformanceHeaderCell}>Reps</Text>
-                    <Text style={styles.bestPerformanceHeaderCell}>Weight</Text>
-                    <Text style={styles.bestPerformanceHeaderCell}>Volume</Text>
-                  </View>
-                  
-                  {bestPerformance.allSets.map((set, index) => {
-                    const reps = parseFloat(set.reps) || 0;
-                    const rawWeight = parseFloat(set.weight) || 0;
-                    const weight = displayWeight(rawWeight, bestPerformance.weightUnit);
-                    const volume = weight * reps;
-                    
-                    return (
-                      <View 
-                        key={`best-set-${index}`} 
-                        style={[
-                          styles.bestPerformanceRow,
-                          index === bestPerformance.setIndex ? styles.bestPerformanceHighlight : null
-                        ]}
-                      >
-                        <Text style={styles.bestPerformanceCell}>{index + 1}</Text>
-                        <Text style={styles.bestPerformanceCell}>{set.reps || '-'}</Text>
-                        <Text style={styles.bestPerformanceCell}>
-                          {weight > 0 ? `${weight.toFixed(1)} ${weightUnit}` : '-'}
-                        </Text>
-                        <Text style={styles.bestPerformanceCell}>{volume.toFixed(1)}</Text>
-                      </View>
-                    );
-                  })}
+            {/* Tabs */}
+            <View style={styles.tabsContainer}>
+              {(['history', 'best', 'suggested'] as Array<'history' | 'best' | 'suggested'>).map((tab) => (
+                <TouchableOpacity
+                  key={tab}
+                  style={[
+                    styles.tab,
+                    activeTab === tab ? styles.activeTab : null
+                  ]}
+                  onPress={() => setActiveTab(tab)}
+                >
+                  <Ionicons 
+                    name={tab === 'history' ? 'time-outline' : tab === 'best' ? 'trophy-outline' : 'analytics-outline'} 
+                    size={20} 
+                    color={activeTab === tab ? '#fff' : '#757575'} 
+                    style={styles.tabIcon}
+                  />
+                  <Text 
+                    style={[
+                      styles.tabText,
+                      activeTab === tab ? styles.activeTabText : null
+                    ]}
+                  >
+                    {tab === 'history' ? 'History' : tab === 'best' ? 'Personal Records' : 'Suggested Weights'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            
+            {/* Tab Content */}
+            <View style={{ flex: 1, padding: 0 }}>
+              {loading ? (
+                <ActivityIndicator size="large" color="#1E88E5" style={{ marginTop: 40 }} />
+              ) : !exerciseStats ? (
+                <View style={styles.emptyTabContainer}>
+                  <Text style={styles.noStatsText}>
+                    {selectedExercise ? 'No data available' : 'No exercise selected'}
+                  </Text>
                 </View>
-                
-                {/* One Rep Max Estimation */}
-                {(() => {
-                  const bestReps = parseFloat(bestPerformance.reps) || 0;
-                  const rawWeight = parseFloat(bestPerformance.weight) || 0;
-                  const bestWeight = displayWeight(rawWeight, bestPerformance.weightUnit);
-                  const oneRepMax = calculateOneRepMax(bestWeight, bestReps);
-                  const suggestedWeight = calculateSuggestedWeight(oneRepMax, suggestedReps);
-                  
-                  return (
-                    <View style={styles.estimationContainer}>
-                      <View style={styles.estimationCard}>
-                        <Text style={styles.estimationTitle}>Estimated 1RM</Text>
-                        <Text style={styles.estimationValue}>
-                          {oneRepMax > 0 ? `${oneRepMax.toFixed(1)} ${weightUnit}` : '-'} 
-                        </Text>
-                        <Text style={styles.estimationLabel}>
-                          Based on {bestWeight.toFixed(1)} {weightUnit} × {bestReps} reps
-                        </Text>
-                      </View>
-                      
-                      <View style={styles.estimationCard}>
-                        <Text style={styles.estimationTitle}>Suggested Weight</Text>
-                        <Text style={styles.estimationValue}>
-                          {suggestedWeight > 0 ? `${suggestedWeight.toFixed(1)} ${weightUnit}` : '-'}
-                        </Text>
-                        <Text style={styles.estimationLabel}>
-                          For {suggestedReps} reps
-                        </Text>
-                      </View>
-                    </View>
-                  );
-                })()}
-                
-                <Text style={styles.bestPerformanceNote}>
-                  Based on data from the last {historyDays} days
-                </Text>
-              </View>
-            ) : (
-              <Text style={styles.noStatsText}>No performance data found</Text>
-            )}
-            
-            <Text style={styles.sectionTitle}>Workout History</Text>
-            
-            {exerciseStats.length === 0 ? (
-              <Text style={styles.noStatsText}>No history found for this exercise</Text>
-            ) : (
-              <ScrollView style={styles.statsList}>
-                {exerciseStats.map((workout, workoutIndex) => (
-                  <View key={`workout-${workoutIndex}`} style={styles.workoutContainer}>
-                    <View style={styles.workoutHeader}>
-                      <Text style={styles.workoutDate}>
-                        {formatDate(workout.date)}
-                      </Text>
-                    </View>
-                    
-                    <View style={styles.statsHeader}>
-                      <Text style={styles.statsHeaderText}>Set</Text>
-                      <Text style={styles.statsHeaderText}>Reps</Text>
-                      <Text style={styles.statsHeaderText}>Weight</Text>
-                    </View>
-                    
-                    {workout.sets.map((set: ExerciseSet, setIndex: number) => {
-                      const rawWeight = parseFloat(set.weight) || 0;
-                      const weight = displayWeight(rawWeight, workout.weightUnit);
-                      
-                      return (
-                        <View 
-                          key={`set-${setIndex}`} 
-                          style={[
-                            styles.statsRow,
-                            // Highlight the best performance set
-                            bestPerformance && 
-                            bestPerformance.workoutId === workout.id && 
-                            bestPerformance.setIndex === setIndex 
-                              ? styles.bestPerformanceHighlight 
-                              : null
-                          ]}
-                        >
-                          <Text style={styles.statsCell}>{setIndex + 1}</Text>
-                          <Text style={styles.statsCell}>{set.reps || '-'}</Text>
-                          <Text style={styles.statsCell}>
-                            {weight > 0 ? `${weight.toFixed(1)} ${weightUnit}` : '-'}
+              ) : (
+                <>
+                  {activeTab === 'history' && (
+                    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 15 }}>
+                      {exerciseStats.workouts && exerciseStats.workouts.length > 0 ? (
+                        exerciseStats.workouts.map((workout, workoutIndex) => (
+                          <View key={`workout-${workoutIndex}`} style={styles.workoutContainer}>
+                            <View style={styles.workoutHeader}>
+                              <Text style={styles.workoutDate}>
+                                {new Date(workout.date).toLocaleDateString()}
+                              </Text>
+                            </View>
+                            
+                            <View style={styles.statsHeader}>
+                              <Text style={styles.statsHeaderText}>Set</Text>
+                              <Text style={styles.statsHeaderText}>Reps</Text>
+                              <Text style={styles.statsHeaderText}>Weight</Text>
+                            </View>
+                            
+                            {workout.sets.map((set, setIndex) => (
+                              <View 
+                                key={`set-${setIndex}`} 
+                                style={styles.statsRow}
+                              >
+                                <Text style={styles.statsCell}>{setIndex + 1}</Text>
+                                <Text style={styles.statsCell}>{set.reps || '-'}</Text>
+                                <Text style={styles.statsCell}>
+                                  {set.weight} {workout.weightUnit || 'kg'}
+                                </Text>
+                              </View>
+                            ))}
+                          </View>
+                        ))
+                      ) : (
+                        <View style={styles.emptyTabContainer}>
+                          <Ionicons name="time-outline" size={60} color="#E3F2FD" />
+                          <Text style={styles.noStatsText}>No workout history found</Text>
+                          <Text style={styles.emptyListSubtext}>
+                            Complete workouts with this exercise to see your history
                           </Text>
                         </View>
-                      );
-                    })}
-                  </View>
-                ))}
-              </ScrollView>
-            )}
-            
-            <TouchableOpacity 
-              style={styles.closeModalButton}
-              onPress={() => setShowStatsModal(false)}
-            >
-              <Text style={styles.closeModalButtonText}>Close</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity 
-              style={styles.viewFullHistoryButton}
-              onPress={() => {
-                setShowStatsModal(false);
-                navigateToExerciseHistory(selectedExercise);
-              }}
-            >
-              <Text style={styles.viewFullHistoryButtonText}>View Full History</Text>
-            </TouchableOpacity>
+                      )}
+                    </ScrollView>
+                  )}
+                  
+                  {activeTab === 'best' && (
+                    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 15 }}>
+                      {exerciseStats.bestSet ? (
+                        <>
+                          <View style={styles.bestPerformanceContainer}>
+                            <View style={styles.bestPerformanceBadge}>
+                              <Ionicons name="trophy" size={16} color="#fff" />
+                              <Text style={styles.bestPerformanceBadgeText}>PERSONAL BEST</Text>
+                            </View>
+                            
+                            <Text style={styles.bestPerformanceTitle}>Best Overall Set</Text>
+                            {exerciseStats.bestSetDate && (
+                              <Text style={styles.bestPerformanceDate}>
+                                {new Date(exerciseStats.bestSetDate).toLocaleDateString()}
+                              </Text>
+                            )}
+                            
+                            <View style={styles.bestPerformanceTable}>
+                              <View style={styles.bestPerformanceTableHeader}>
+                                <Text style={styles.bestPerformanceHeaderCell}>Set</Text>
+                                <Text style={styles.bestPerformanceHeaderCell}>Reps</Text>
+                                <Text style={styles.bestPerformanceHeaderCell}>Weight</Text>
+                                <Text style={styles.bestPerformanceHeaderCell}>Volume</Text>
+                              </View>
+                              
+                              <View style={[styles.bestPerformanceRow, styles.bestPerformanceHighlight]}>
+                                <Text style={styles.bestPerformanceCell}>1</Text>
+                                <Text style={styles.bestPerformanceCell}>{exerciseStats.bestSet.reps}</Text>
+                                <Text style={styles.bestPerformanceCell}>
+                                  {exerciseStats.bestSet.weight}{exerciseStats.bestSet.unit}
+                                </Text>
+                                <Text style={styles.bestPerformanceCell}>
+                                  {(exerciseStats.bestSet.reps * exerciseStats.bestSet.weight).toFixed(1)}
+                                  {exerciseStats.bestSet.unit}
+                                </Text>
+                              </View>
+                            </View>
+                            
+                            <Text style={styles.bestPerformanceNote}>
+                              This is your highest volume set (weight × reps)
+                            </Text>
+                          </View>
+
+                          {exerciseStats.estimatedOneRepMax && exerciseStats.estimatedOneRepMax > 0 && (
+                            <View style={styles.oneRepMaxContainer}>
+                              <Text style={styles.oneRepMaxTitle}>Estimated 1-Rep Max</Text>
+                              <Text style={styles.oneRepMaxValue}>
+                                {exerciseStats.estimatedOneRepMax.toFixed(1)}{exerciseStats.bestSet.unit || 'kg'}
+                              </Text>
+                              <Text style={styles.oneRepMaxDescription}>
+                                Based on your best set using the Brzycki formula
+                              </Text>
+                            </View>
+                          )}
+
+                          {exerciseStats.personalBests && Object.keys(exerciseStats.personalBests).length > 0 && (
+                            <View style={styles.bestPerformanceContainer}>
+                              <Text style={styles.bestPerformanceTitle}>Best Lifts By Rep Range</Text>
+                              
+                              <View style={styles.bestPerformanceTable}>
+                                <View style={styles.bestPerformanceTableHeader}>
+                                  <Text style={styles.bestPerformanceHeaderCell}>Reps</Text>
+                                  <Text style={styles.bestPerformanceHeaderCell}>Weight</Text>
+                                  <Text style={styles.bestPerformanceHeaderCell}>Date</Text>
+                                </View>
+                                
+                                {Object.entries(exerciseStats.personalBests)
+                                  .sort(([repsA], [repsB]) => parseInt(repsA) - parseInt(repsB))
+                                  .map(([reps, best]) => (
+                                    <View key={reps} style={styles.bestPerformanceRow}>
+                                      <Text style={styles.bestPerformanceCell}>{reps}</Text>
+                                      <Text style={styles.bestPerformanceCell}>
+                                        {best.weight.toFixed(1)}{best.unit}
+                                      </Text>
+                                      <Text style={styles.bestPerformanceCell}>
+                                        {best.date ? new Date(best.date).toLocaleDateString() : 'N/A'}
+                                      </Text>
+                                    </View>
+                                  ))}
+                              </View>
+                            </View>
+                          )}
+                        </>
+                      ) : (
+                        <View style={styles.emptyTabContainer}>
+                          <Ionicons name="trophy-outline" size={60} color="#E3F2FD" />
+                          <Text style={styles.noStatsText}>No personal records yet</Text>
+                          <Text style={styles.emptyListSubtext}>
+                            Complete more workouts with this exercise to see your best lifts
+                          </Text>
+                        </View>
+                      )}
+                    </ScrollView>
+                  )}
+                  
+                  {activeTab === 'suggested' && (
+                    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 15 }}>
+                      {exerciseStats.estimatedOneRepMax && exerciseStats.estimatedOneRepMax > 0 ? (
+                        <>
+                          <View style={styles.oneRepMaxContainer}>
+                            <Text style={styles.oneRepMaxTitle}>Estimated 1-Rep Max</Text>
+                            <Text style={styles.oneRepMaxValue}>
+                              {exerciseStats.estimatedOneRepMax.toFixed(1)}
+                              {exerciseStats.bestSet?.unit || 'kg'}
+                            </Text>
+                            <Text style={styles.oneRepMaxDescription}>
+                              Based on your best performance using the Brzycki formula
+                            </Text>
+                          </View>
+
+                          <View style={styles.suggestedWeightsContainer}>
+                            <Text style={styles.suggestedWeightsTitle}>Suggested Weights</Text>
+                            <Text style={styles.suggestedWeightsDescription}>
+                              Based on your estimated 1-rep max
+                            </Text>
+                            
+                            <View style={styles.suggestedWeightsTable}>
+                              <View style={styles.suggestedWeightsHeader}>
+                                <Text style={styles.suggestedWeightsHeaderCell}>Reps</Text>
+                                <Text style={styles.suggestedWeightsHeaderCell}>
+                                  Weight ({exerciseStats.bestSet?.unit || 'kg'})
+                                </Text>
+                                <Text style={styles.suggestedWeightsHeaderCell}>% of 1RM</Text>
+                              </View>
+                              
+                              {[1, 2, 3, 5, 8, 10, 12, 15].map(reps => {
+                                const suggestedWeight = calculateSuggestedWeight(
+                                  exerciseStats.estimatedOneRepMax || 0, 
+                                  reps
+                                );
+                                const percentage = (suggestedWeight / (exerciseStats.estimatedOneRepMax || 1)) * 100;
+                                
+                                return (
+                                  <View key={`reps-${reps}`} style={styles.suggestedWeightsRow}>
+                                    <Text style={styles.suggestedWeightsCell}>{reps}</Text>
+                                    <Text style={styles.suggestedWeightsCell}>
+                                      {suggestedWeight.toFixed(1)}
+                                    </Text>
+                                    <Text style={styles.suggestedWeightsCell}>
+                                      {percentage.toFixed(0)}%
+                                    </Text>
+                                  </View>
+                                );
+                              })}
+                            </View>
+                            
+                            <Text style={styles.suggestedWeightsNote}>
+                              These are theoretical values and may vary based on individual factors.
+                              Always start with a weight you can safely handle.
+                            </Text>
+                          </View>
+                        </>
+                      ) : (
+                        <View style={styles.emptyTabContainer}>
+                          <Ionicons name="analytics-outline" size={60} color="#E3F2FD" />
+                          <Text style={styles.noStatsText}>No data available for suggestions</Text>
+                          <Text style={styles.emptyListSubtext}>
+                            Complete more workouts with this exercise
+                          </Text>
+                        </View>
+                      )}
+                    </ScrollView>
+                  )}
+                  
+                  <TouchableOpacity 
+                    style={styles.viewFullHistoryButton}
+                    onPress={() => {
+                      setShowStatsModal(false);
+                      navigateToExerciseHistory(selectedExercise);
+                    }}
+                  >
+                    <Text style={styles.viewFullHistoryButtonText}>View Full History</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
           </View>
         </View>
       </Modal>
@@ -926,16 +1267,17 @@ export default function WorkoutScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: COLORS.background,
   },
   contentContainer: {
     padding: 20,
   },
   title: {
-    fontSize: 24,
+    fontSize: 26,
     fontWeight: 'bold',
     marginBottom: 20,
     textAlign: 'center',
+    color: COLORS.text,
   },
   addExerciseContainer: {
     flexDirection: 'row',
@@ -949,10 +1291,12 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 5,
-    padding: 10,
+    borderColor: COLORS.border,
+    borderRadius: 8,
+    padding: 12,
     marginRight: 10,
+    backgroundColor: COLORS.card,
+    color: COLORS.text,
   },
   suggestionsContainer: {
     position: 'absolute',
@@ -960,40 +1304,55 @@ const styles = StyleSheet.create({
     left: 0,
     right: 10,
     zIndex: 1,
-    backgroundColor: 'white',
+    backgroundColor: COLORS.card,
     borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 5,
+    borderColor: COLORS.border,
+    borderRadius: 8,
     maxHeight: 150,
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
   },
   suggestionsList: {
     width: '100%',
   },
   suggestionItem: {
-    padding: 10,
+    padding: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    borderBottomColor: COLORS.border,
   },
   smallInput: {
     flex: 1,
     marginRight: 5,
   },
   addButton: {
-    backgroundColor: '#4CAF50',
-    padding: 10,
-    borderRadius: 5,
+    backgroundColor: COLORS.primary,
+    padding: 12,
+    borderRadius: 8,
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
   },
   buttonText: {
-    color: 'white',
+    color: COLORS.card,
     fontWeight: 'bold',
   },
   exerciseCard: {
-    backgroundColor: '#f9f9f9',
+    backgroundColor: COLORS.card,
     borderRadius: 10,
     padding: 15,
     marginBottom: 15,
     borderWidth: 1,
-    borderColor: '#eee',
+    borderColor: COLORS.border,
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
   },
   exerciseHeader: {
     flexDirection: 'row',
@@ -1005,30 +1364,31 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     flex: 1,
+    color: COLORS.text,
   },
   exerciseActions: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   historyButton: {
-    backgroundColor: '#007BFF',
-    paddingVertical: 5,
-    paddingHorizontal: 10,
-    borderRadius: 5,
+    backgroundColor: COLORS.primary,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 6,
     marginRight: 10,
   },
   historyButtonText: {
-    color: 'white',
+    color: COLORS.card,
     fontSize: 12,
     fontWeight: 'bold',
   },
   deleteButton: {
     padding: 8,
     borderRadius: 5,
-    backgroundColor: '#ffebee',
+    backgroundColor: 'rgba(255, 82, 82, 0.1)',
   },
   deleteButtonText: {
-    color: '#f44336',
+    color: COLORS.accent,
     fontSize: 14,
     fontWeight: 'bold',
   },
@@ -1044,40 +1404,46 @@ const styles = StyleSheet.create({
   setText: {
     fontSize: 16,
     flex: 1,
+    color: COLORS.text,
   },
   deleteSetButton: {
     padding: 6,
     borderRadius: 5,
-    backgroundColor: '#ffebee',
+    backgroundColor: 'rgba(255, 82, 82, 0.1)',
   },
   inputRow: {
     flexDirection: 'row',
   },
   addSetButton: {
-    backgroundColor: '#2196F3',
+    backgroundColor: COLORS.primaryDark,
     padding: 8,
-    borderRadius: 5,
+    borderRadius: 6,
     alignItems: 'center',
     marginTop: 5,
   },
   completeButton: {
-    backgroundColor: '#FF9800',
+    backgroundColor: COLORS.success,
     padding: 15,
-    borderRadius: 5,
+    borderRadius: 8,
     alignItems: 'center',
     marginVertical: 20,
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 3,
   },
   cancelButton: {
-    backgroundColor: '#f5f5f5',
+    backgroundColor: COLORS.background,
     padding: 15,
-    borderRadius: 5,
+    borderRadius: 8,
     alignItems: 'center',
     marginBottom: 20,
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: COLORS.border,
   },
   cancelButtonText: {
-    color: '#666',
+    color: COLORS.textSecondary,
     fontWeight: 'bold',
   },
   modalOverlay: {
@@ -1088,108 +1454,353 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   modalContent: {
-    backgroundColor: 'white',
+    backgroundColor: COLORS.card,
     borderRadius: 10,
     padding: 20,
     width: '90%',
     maxHeight: '90%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 15,
   },
   modalTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    marginBottom: 15,
-    textAlign: 'center',
+    color: COLORS.text,
   },
-  modalSubtitle: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 15,
-    textAlign: 'center',
+  closeButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: COLORS.primaryLight,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  modalButtons: {
+  tabsContainer: {
     flexDirection: 'row',
-    width: '100%',
-    justifyContent: 'space-between',
+    backgroundColor: COLORS.background,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+    marginBottom: 15,
   },
-  discardButton: {
-    backgroundColor: '#f5f5f5',
-    padding: 10,
-    borderRadius: 5,
+  tab: {
+    flex: 1,
+    paddingVertical: 14,
+    paddingHorizontal: 5,
+    backgroundColor: COLORS.background,
     alignItems: 'center',
-    width: '48%',
-    borderWidth: 1,
-    borderColor: '#ddd',
+    flexDirection: 'row',
+    justifyContent: 'center',
   },
-  resumeButton: {
-    backgroundColor: '#4CAF50',
-    padding: 10,
-    borderRadius: 5,
+  activeTab: {
+    backgroundColor: COLORS.primary,
+  },
+  tabIcon: {
+    marginRight: 6,
+  },
+  tabText: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    color: COLORS.textSecondary,
+  },
+  activeTabText: {
+    color: COLORS.card,
+  },
+  emptyTabContainer: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
-    width: '48%',
-  },
-  discardButtonText: {
-    color: '#666',
-    fontWeight: 'bold',
-  },
-  resumeButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
+    padding: 20,
   },
   noStatsText: {
     textAlign: 'center',
     padding: 20,
-    color: '#888',
+    color: COLORS.textSecondary,
+    fontSize: 16,
   },
-  statsContainer: {
-    height: 300,
-    marginBottom: 15,
+  emptyListSubtext: {
+    textAlign: 'center',
+    padding: 20,
+    color: COLORS.textSecondary,
+  },
+  workoutContainer: {
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 8,
+    overflow: 'hidden',
+    backgroundColor: COLORS.card,
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  workoutHeader: {
+    backgroundColor: COLORS.primaryLight,
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  workoutDate: {
+    fontWeight: 'bold',
+    fontSize: 14,
+    color: COLORS.text,
   },
   statsHeader: {
     flexDirection: 'row',
-    backgroundColor: '#f0f0f0',
-    paddingVertical: 10,
+    backgroundColor: COLORS.primaryLight,
+    paddingVertical: 12,
     borderTopLeftRadius: 5,
     borderTopRightRadius: 5,
-    marginBottom: 5,
   },
   statsHeaderText: {
     flex: 1,
     fontWeight: 'bold',
     textAlign: 'center',
-  },
-  statsList: {
-    maxHeight: 300,
+    color: COLORS.secondary,
   },
   statsRow: {
     flexDirection: 'row',
-    paddingVertical: 8,
+    paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    borderBottomColor: COLORS.border,
   },
   statsCell: {
     flex: 1,
     textAlign: 'center',
+    color: COLORS.text,
   },
-  closeModalButton: {
-    backgroundColor: '#4CAF50',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 5,
-    marginTop: 10,
+  bestPerformanceContainer: {
+    marginVertical: 15,
+    backgroundColor: COLORS.card,
+    borderRadius: 10,
+    padding: 15,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  bestPerformanceBadge: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.primary,
     alignSelf: 'center',
+    borderRadius: 20,
+    paddingVertical: 5,
+    paddingHorizontal: 12,
+    marginBottom: 15,
+    alignItems: 'center',
   },
-  closeModalButtonText: {
-    color: 'white',
+  bestPerformanceBadgeText: {
+    fontSize: 14,
     fontWeight: 'bold',
+    color: COLORS.card,
+    marginLeft: 6,
+  },
+  bestPerformanceTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 10,
+    color: COLORS.primary,
     textAlign: 'center',
   },
+  bestPerformanceDate: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginBottom: 15,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+  },
+  bestPerformanceTable: {
+    marginBottom: 15,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  bestPerformanceTableHeader: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.primaryLight,
+    paddingVertical: 12,
+  },
+  bestPerformanceHeaderCell: {
+    flex: 1,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    color: COLORS.secondary,
+  },
+  bestPerformanceRow: {
+    flexDirection: 'row',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+    backgroundColor: COLORS.card,
+  },
+  bestPerformanceHighlight: {
+    backgroundColor: 'rgba(30, 136, 229, 0.1)',
+  },
+  bestPerformanceCell: {
+    flex: 1,
+    textAlign: 'center',
+    color: COLORS.text,
+  },
+  bestPerformanceNote: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    marginTop: 10,
+  },
+  oneRepMaxContainer: {
+    marginTop: 15,
+    padding: 20,
+    backgroundColor: COLORS.primaryLight,
+    borderRadius: 10,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.primary,
+  },
+  oneRepMaxTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 10,
+    color: COLORS.secondary,
+  },
+  oneRepMaxValue: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    marginBottom: 10,
+    color: COLORS.primary,
+  },
+  oneRepMaxDescription: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+  },
+  suggestedWeightsContainer: {
+    marginVertical: 15,
+    backgroundColor: COLORS.card,
+    borderRadius: 10,
+    padding: 15,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  suggestedWeightsTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 10,
+    color: COLORS.primary,
+    textAlign: 'center',
+  },
+  suggestedWeightsDescription: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    marginBottom: 15,
+  },
+  suggestedWeightsTable: {
+    marginBottom: 15,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  suggestedWeightsHeader: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.primaryLight,
+    paddingVertical: 12,
+    paddingHorizontal: 5,
+  },
+  suggestedWeightsHeaderCell: {
+    flex: 1,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    color: COLORS.secondary,
+  },
+  suggestedWeightsRow: {
+    flexDirection: 'row',
+    paddingVertical: 12,
+    paddingHorizontal: 5,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+    backgroundColor: COLORS.card,
+  },
+  suggestedWeightsCell: {
+    flex: 1,
+    textAlign: 'center',
+    color: COLORS.text,
+  },
+  suggestedWeightsNote: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    marginBottom: 15,
+    fontStyle: 'italic',
+  },
+  viewFullHistoryButton: {
+    backgroundColor: COLORS.primary,
+    padding: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 10,
+    marginHorizontal: 20,
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 3,
+  },
+  viewFullHistoryButtonText: {
+    color: COLORS.card,
+    fontWeight: 'bold',
+    fontSize: 15,
+  },
+  timerContainer: {
+    backgroundColor: COLORS.primary,
+    borderRadius: 10,
+    padding: 15,
+    marginBottom: 20,
+    alignItems: 'center',
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 3,
+  },
+  timerLabel: {
+    color: 'rgba(255, 255, 255, 0.9)',
+    fontSize: 14,
+    marginBottom: 5,
+  },
+  timerText: {
+    color: COLORS.card,
+    fontSize: 24,
+    fontWeight: 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
   confirmModalContent: {
-    backgroundColor: 'white',
+    backgroundColor: COLORS.card,
     borderRadius: 10,
     padding: 20,
     width: '90%',
     alignItems: 'center',
-    shadowColor: '#000',
+    shadowColor: COLORS.shadow,
     shadowOffset: {
       width: 0,
       height: 2,
@@ -1203,11 +1814,12 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginBottom: 15,
     textAlign: 'center',
+    color: COLORS.text,
   },
   confirmModalText: {
     textAlign: 'center',
     marginBottom: 20,
-    color: '#555',
+    color: COLORS.textSecondary,
   },
   confirmButtonRow: {
     flexDirection: 'row',
@@ -1215,164 +1827,61 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   cancelConfirmButton: {
-    backgroundColor: '#f0f0f0',
-    paddingVertical: 10,
+    backgroundColor: COLORS.background,
+    paddingVertical: 12,
     paddingHorizontal: 15,
-    borderRadius: 5,
+    borderRadius: 8,
     marginRight: 10,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
   cancelConfirmButtonText: {
-    color: '#555',
+    color: COLORS.textSecondary,
     fontWeight: 'bold',
   },
   confirmButton: {
-    backgroundColor: '#FF3B30',
-    paddingVertical: 10,
+    backgroundColor: COLORS.accent,
+    paddingVertical: 12,
     paddingHorizontal: 15,
-    borderRadius: 5,
+    borderRadius: 8,
   },
   confirmButtonText: {
-    color: 'white',
+    color: COLORS.card,
     fontWeight: 'bold',
   },
-  timerContainer: {
-    backgroundColor: '#4CAF50',
-    borderRadius: 8,
-    padding: 10,
-    marginBottom: 20,
-    alignItems: 'center',
-  },
-  timerLabel: {
-    color: 'rgba(255, 255, 255, 0.8)',
+  modalSubtitle: {
     fontSize: 14,
-    marginBottom: 4,
-  },
-  timerText: {
-    color: 'white',
-    fontSize: 24,
-    fontWeight: 'bold',
-    fontFamily: 'monospace',
-  },
-  bestPerformanceContainer: {
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: '#eee',
-    borderRadius: 8,
-    padding: 15,
-    backgroundColor: '#f9f9f9',
-  },
-  bestPerformanceTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 10,
-    color: '#4CAF50',
-  },
-  bestPerformanceDate: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    marginBottom: 10,
-    color: '#666',
-  },
-  bestPerformanceTable: {
-    marginBottom: 10,
-  },
-  bestPerformanceTableHeader: {
-    flexDirection: 'row',
-    backgroundColor: '#f0f0f0',
-    paddingVertical: 10,
-    borderTopLeftRadius: 5,
-    borderTopRightRadius: 5,
-    marginBottom: 5,
-  },
-  bestPerformanceHeaderCell: {
-    flex: 1,
-    fontWeight: 'bold',
+    color: COLORS.textSecondary,
+    marginBottom: 15,
     textAlign: 'center',
   },
-  bestPerformanceRow: {
+  modalButtons: {
     flexDirection: 'row',
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
-  bestPerformanceHighlight: {
-    backgroundColor: '#e0f2f1',
-  },
-  bestPerformanceCell: {
-    flex: 1,
-    textAlign: 'center',
-  },
-  bestPerformanceNote: {
-    fontSize: 12,
-    color: '#888',
-    fontStyle: 'italic',
-    textAlign: 'center',
-    marginTop: 5,
-  },
-  estimationContainer: {
-    flexDirection: 'row',
+    width: '100%',
     justifyContent: 'space-between',
-    marginVertical: 15,
-    paddingHorizontal: 5,
   },
-  estimationCard: {
-    flex: 1,
-    backgroundColor: '#f0f0f0',
+  discardButton: {
+    backgroundColor: COLORS.background,
+    padding: 12,
     borderRadius: 8,
-    padding: 10,
     alignItems: 'center',
-    marginHorizontal: 5,
+    width: '48%',
     borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: COLORS.border,
   },
-  estimationTitle: {
-    fontSize: 14,
+  discardButtonText: {
+    color: COLORS.textSecondary,
     fontWeight: 'bold',
-    marginBottom: 5,
-    color: '#4CAF50',
   },
-  estimationValue: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 3,
-  },
-  estimationLabel: {
-    fontSize: 12,
-    color: '#666',
-    textAlign: 'center',
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginVertical: 10,
-    color: '#333',
-  },
-  workoutContainer: {
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: '#ddd',
+  resumeButton: {
+    backgroundColor: COLORS.primary,
+    padding: 12,
     borderRadius: 8,
-    overflow: 'hidden',
-  },
-  workoutHeader: {
-    backgroundColor: '#e0f2f1',
-    padding: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#ddd',
-  },
-  workoutDate: {
-    fontWeight: 'bold',
-    fontSize: 14,
-  },
-  viewFullHistoryButton: {
-    backgroundColor: '#4CAF50',
-    padding: 10,
-    borderRadius: 5,
     alignItems: 'center',
-    marginTop: 10,
+    width: '48%',
   },
-  viewFullHistoryButtonText: {
-    color: 'white',
+  resumeButtonText: {
+    color: COLORS.card,
     fontWeight: 'bold',
   },
 }); 

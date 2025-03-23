@@ -15,18 +15,24 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as storageService from '../../services/storageService';
 import * as settingsService from '../../services/settingsService';
+import { Ionicons } from '@expo/vector-icons';
+import { format } from 'date-fns';
+import Icon from '@expo/vector-icons/Ionicons';
+import { COLORS } from '../../services/colors';
 
 // Define types for exercise stats
 interface ExerciseSet {
   id: string;
   reps: string;
   weight: string;
+  unit?: string;
 }
 
 interface WorkoutStat {
   id: string;
   date: string;
   sets: ExerciseSet[];
+  weightUnit?: string;
 }
 
 interface GraphDataPoint {
@@ -40,6 +46,29 @@ interface GraphData {
   maxReps: GraphDataPoint[];
 }
 
+interface BestSet {
+  reps: number;
+  weight: number;
+  unit?: string;
+}
+
+interface PersonalBest {
+  weight: number;
+  reps: number;
+  date?: string;
+  unit?: string;
+}
+
+interface ExerciseStats {
+  bestSet?: BestSet;
+  bestSetDate?: string;
+  estimatedOneRepMax?: number;
+  personalBests?: {
+    [key: string]: PersonalBest;
+  };
+  workouts?: WorkoutStat[];
+}
+
 interface BestPerformance {
   workoutId: string;
   date: string;
@@ -48,8 +77,11 @@ interface BestPerformance {
   volume: number;
   setIndex: number;
   allSets: ExerciseSet[];
-  weightUnit: string;
+  weightUnit?: string;
 }
+
+// Tab type definition
+type TabType = 'history' | 'best' | 'suggested';
 
 // For line charts
 const LineChart = ({ data, width, height, color }: any) => {
@@ -58,6 +90,30 @@ const LineChart = ({ data, width, height, color }: any) => {
     return (
       <View style={[styles.chart, { width, height }]}>
         <Text style={styles.noDataText}>No data available</Text>
+      </View>
+    );
+  }
+
+  // Need at least 2 points to draw a line
+  if (data.length === 1) {
+    const point = data[0];
+    return (
+      <View style={[styles.chart, { width, height }]}>
+        <Text style={styles.axisLabel}>{point.value}</Text>
+        <View 
+          style={{
+            position: 'absolute',
+            left: width / 2 - 4,
+            top: height / 2 - 4,
+            width: 8,
+            height: 8,
+            borderRadius: 4,
+            backgroundColor: color,
+          }}
+        />
+        <Text style={[styles.axisLabel, { bottom: 5, alignSelf: 'center' }]}>
+          {point.label}
+        </Text>
       </View>
     );
   }
@@ -82,8 +138,8 @@ const LineChart = ({ data, width, height, color }: any) => {
   return (
     <View style={[styles.chart, { width, height }]}>
       {/* Y-axis labels */}
-      <Text style={[styles.axisLabel, { top: 5, right: 5 }]}>{maxValue}</Text>
-      <Text style={[styles.axisLabel, { bottom: 5, right: 5 }]}>{minValue}</Text>
+      <Text style={[styles.axisLabel, { top: 5, right: 5 }]}>{maxValue.toFixed(1)}</Text>
+      <Text style={[styles.axisLabel, { bottom: 5, right: 5 }]}>{minValue.toFixed(1)}</Text>
       
       {/* Render data points and lines */}
       <View style={{ position: 'absolute', left: 0, top: 0, width, height }}>
@@ -96,7 +152,10 @@ const LineChart = ({ data, width, height, color }: any) => {
                   position: 'absolute',
                   left: point.x,
                   top: point.y,
-                  width: points[i + 1].x - point.x,
+                  width: Math.sqrt(
+                    Math.pow(points[i + 1].x - point.x, 2) + 
+                    Math.pow(points[i + 1].y - point.y, 2)
+                  ),
                   height: 2,
                   backgroundColor: color,
                   transform: [
@@ -152,7 +211,8 @@ export default function ExerciseHistoryScreen() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedExercise, setSelectedExercise] = useState<string | null>(null);
-  const [exerciseStats, setExerciseStats] = useState<WorkoutStat[]>([]);
+  const [exerciseStats, setExerciseStats] = useState<ExerciseStats | null>(null);
+  const [workoutStats, setWorkoutStats] = useState<WorkoutStat[]>([]);
   const [bestPerformance, setBestPerformance] = useState<BestPerformance | null>(null);
   const [showStatsModal, setShowStatsModal] = useState(false);
   const [showGraphsModal, setShowGraphsModal] = useState(false);
@@ -164,6 +224,8 @@ export default function ExerciseHistoryScreen() {
   const [historyDays, setHistoryDays] = useState(settingsService.DEFAULT_HISTORY_DAYS);
   const [suggestedReps, setSuggestedReps] = useState(settingsService.DEFAULT_SUGGESTED_REPS);
   const [weightUnit, setWeightUnit] = useState<settingsService.WeightUnit>(settingsService.DEFAULT_WEIGHT_UNIT);
+  // Add active tab state
+  const [activeTab, setActiveTab] = useState<TabType>('history');
   
   const screenWidth = Dimensions.get('window').width;
   const chartWidth = screenWidth * 0.85;
@@ -172,11 +234,16 @@ export default function ExerciseHistoryScreen() {
   useEffect(() => {
     loadSettings();
     loadExercises();
+    console.log('Initial render, loading settings and exercises');
   }, []);
   
   useEffect(() => {
     // Check if an exercise was passed as a parameter
+    console.log('Params changed:', params);
+    console.log('Selected exercise param:', params.selectedExercise);
+    
     if (params.selectedExercise && typeof params.selectedExercise === 'string') {
+      console.log(`Will load exercise: ${params.selectedExercise}`);
       handleExercisePress(params.selectedExercise);
     }
   }, [params.selectedExercise, exercises]);
@@ -191,6 +258,8 @@ export default function ExerciseHistoryScreen() {
       
       const unit = await settingsService.getWeightUnit();
       setWeightUnit(unit);
+      
+      console.log(`Settings loaded: historyDays=${days}, suggestedReps=${reps}, weightUnit=${unit}`);
     } catch (error) {
       console.error('Error loading settings:', error);
     }
@@ -216,13 +285,20 @@ export default function ExerciseHistoryScreen() {
     setSelectedExercise(exerciseName);
     setLoading(true);
     
+    console.log(`Loading exercise history for: ${exerciseName}`);
+    
     try {
       // Get exercise stats from workouts
-      const stats = await storageService.getExerciseStatsByWorkout(exerciseName, historyDays);
-      setExerciseStats(stats);
+      const workoutStats = await storageService.getExerciseStatsByWorkout(exerciseName, historyDays);
+      console.log(`Found ${workoutStats.length} workout stats:`, JSON.stringify(workoutStats.slice(0, 1)));
+      setWorkoutStats(workoutStats);
       
       // Get best performance (highest volume)
       const best = await storageService.getBestPerformance(exerciseName, historyDays);
+      console.log('Best performance:', best ? JSON.stringify(best) : 'None found');
+      
+      // Create new exerciseStats object
+      const stats: ExerciseStats = { workouts: workoutStats };
       
       if (best) {
         // Ensure weightUnit has a default value
@@ -232,11 +308,41 @@ export default function ExerciseHistoryScreen() {
         };
         setBestPerformance(bestWithWeightUnit);
         
-        // Prepare graph data
-        prepareGraphData();
-      } else {
-        setBestPerformance(null);
+        // Add best set to stats
+        stats.bestSet = {
+          reps: parseFloat(best.reps),
+          weight: parseFloat(best.weight),
+          unit: best.weightUnit || 'kg'
+        };
+        stats.bestSetDate = best.date;
+        
+        // Calculate estimated 1RM
+        const oneRepMax = calculateOneRepMax(parseFloat(best.weight), parseFloat(best.reps));
+        stats.estimatedOneRepMax = oneRepMax;
+        
+        // Process personal bests by rep ranges
+        const personalBests: { [key: string]: PersonalBest } = {};
+        for (const workout of workoutStats) {
+          for (const set of workout.sets) {
+            const reps = set.reps;
+            const weight = parseFloat(set.weight);
+            
+            if (!personalBests[reps] || weight > personalBests[reps].weight) {
+              personalBests[reps] = {
+                weight: weight,
+                reps: parseFloat(reps),
+                date: workout.date,
+                unit: workout.weightUnit || 'kg'
+              };
+            }
+          }
+        }
+        stats.personalBests = personalBests;
       }
+      
+      console.log('Setting exerciseStats:', JSON.stringify(stats));
+      setExerciseStats(stats);
+      prepareGraphData();
     } catch (error) {
       console.error('Error loading exercise stats:', error);
       Alert.alert('Error', 'Failed to load exercise stats');
@@ -257,10 +363,10 @@ export default function ExerciseHistoryScreen() {
   };
 
   const prepareGraphData = () => {
-    if (!exerciseStats || exerciseStats.length === 0) return;
+    if (!exerciseStats || exerciseStats.workouts === undefined || exerciseStats.workouts.length === 0) return;
 
     // Sort by date
-    const sortedStats = [...exerciseStats].sort((a, b) => 
+    const sortedStats = [...exerciseStats.workouts].sort((a, b) => 
       new Date(a.date).getTime() - new Date(b.date).getTime()
     );
 
@@ -339,7 +445,9 @@ export default function ExerciseHistoryScreen() {
   // Calculate estimated one rep max using the formula: weight / (1.0278 - 0.0278 × reps)
   const calculateOneRepMax = (weight: number, reps: number): number => {
     if (weight <= 0 || reps <= 0) return 0;
-    return weight / (1.0278 - 0.0278 * reps);
+    
+    // Use Brzycki formula: 1RM = weight × (36 / (37 - reps))
+    return weight * (36 / (37 - Math.min(reps, 36)));
   };
   
   // Calculate suggested weight for target reps based on 1RM
@@ -348,21 +456,341 @@ export default function ExerciseHistoryScreen() {
     return oneRepMax * (1.0278 - 0.0278 * targetReps);
   };
 
+  // Format tab name for display
+  const formatTabName = (tab: TabType): string => {
+    switch (tab) {
+      case 'history':
+        return 'History';
+      case 'best':
+        return 'Personal Records';
+      case 'suggested':
+        return 'Suggested Weights';
+      default:
+        return tab;
+    }
+  };
+
+  // Get tab icon 
+  const getTabIcon = (tab: TabType): any => {
+    switch (tab) {
+      case 'history':
+        return 'time-outline';
+      case 'best':
+        return 'trophy-outline';
+      case 'suggested':
+        return 'analytics-outline';
+      default:
+        return 'list-outline';
+    }
+  };
+
+  // Get icon for exercise type
+  const getExerciseIcon = (exerciseName: string): any => {
+    const lowerName = exerciseName.toLowerCase();
+    
+    if (lowerName.includes('bench') || lowerName.includes('press') || lowerName.includes('push')) {
+      return 'fitness-outline';
+    } else if (lowerName.includes('squat') || lowerName.includes('leg') || lowerName.includes('lunge')) {
+      return 'body-outline';
+    } else if (lowerName.includes('deadlift') || lowerName.includes('row') || lowerName.includes('pull')) {
+      return 'barbell-outline';
+    } else if (lowerName.includes('curl') || lowerName.includes('bicep') || lowerName.includes('tricep')) {
+      return 'fitness-outline';
+    } else if (lowerName.includes('shoulder') || lowerName.includes('delt')) {
+      return 'expand-outline';
+    } else if (lowerName.includes('cardio') || lowerName.includes('run') || lowerName.includes('bike')) {
+      return 'heart-outline';
+    } else {
+      return 'barbell-outline';
+    }
+  };
+
+  // Render tab content based on active tab
+  const renderTabContent = () => {
+    console.log('Rendering tab content for tab:', activeTab);
+    console.log('exerciseStats:', exerciseStats ? 'Present' : 'Null');
+    
+    if (!selectedExercise) {
+      console.log('No exercise selected');
+      return <Text style={styles.noStatsText}>No exercise selected</Text>;
+    }
+
+    switch (activeTab) {
+      case 'history':
+        return renderHistoryTab();
+      case 'best':
+        return renderBestPerformanceTab();
+      case 'suggested':
+        return renderSuggestedWeightsTab();
+      default:
+        return renderHistoryTab();
+    }
+  };
+
+  // Render workout history tab content
+  const renderHistoryTab = () => {
+    console.log('Rendering history tab, exerciseStats:', 
+      exerciseStats ? 
+      `Present with ${exerciseStats.workouts?.length || 0} workouts` : 
+      'Null');
+    
+    if (!exerciseStats || !exerciseStats.workouts || exerciseStats.workouts.length === 0) {
+      console.log('No workout history found');
+      return (
+        <View style={styles.emptyTabContainer}>
+          <Icon name="time-outline" size={80} color={COLORS.primaryLight} />
+          <Text style={styles.emptyListText}>No workout history found</Text>
+          <Text style={styles.emptyListSubtext}>Complete workouts with this exercise to see your history</Text>
+        </View>
+      );
+    }
+
+    console.log(`Rendering ${exerciseStats.workouts.length} workouts in history tab`);
+    return (
+      <ScrollView 
+        style={{ flex: 1 }} 
+        contentContainerStyle={styles.scrollContent}
+      >
+        {exerciseStats.workouts.map((workout, workoutIndex) => (
+          <View key={`workout-${workoutIndex}`} style={styles.workoutContainer}>
+            <View style={styles.workoutHeader}>
+              <Text style={styles.workoutDate}>
+                {format(new Date(workout.date), 'MMMM d, yyyy')}
+              </Text>
+            </View>
+            
+            <View style={styles.bestPerformanceTableHeader}>
+              <Text style={styles.bestPerformanceHeaderCell}>Set</Text>
+              <Text style={styles.bestPerformanceHeaderCell}>Reps</Text>
+              <Text style={styles.bestPerformanceHeaderCell}>Weight</Text>
+            </View>
+            
+            {workout.sets.map((set, setIndex) => (
+              <View key={`set-${setIndex}`} style={styles.bestPerformanceRow}>
+                <Text style={styles.bestPerformanceCell}>{setIndex + 1}</Text>
+                <Text style={styles.bestPerformanceCell}>{set.reps}</Text>
+                <Text style={styles.bestPerformanceCell}>{set.weight}{workout.weightUnit || 'kg'}</Text>
+              </View>
+            ))}
+          </View>
+        ))}
+        
+        <TouchableOpacity 
+          style={styles.graphsButton}
+          onPress={() => setShowGraphsModal(true)}
+        >
+          <Icon name="analytics-outline" size={20} color={COLORS.card} style={styles.tabIcon} />
+          <Text style={styles.graphsButtonText}>View Performance Graphs</Text>
+        </TouchableOpacity>
+      </ScrollView>
+    );
+  };
+
+  // Render best performance tab content
+  const renderBestPerformanceTab = () => {
+    if (!selectedExercise || !exerciseStats) {
+      return (
+        <View style={styles.emptyTabContainer}>
+          <Icon name="trophy-outline" size={80} color={COLORS.primaryLight} />
+          <Text style={styles.emptyListText}>No performance data found</Text>
+          <Text style={styles.emptyListSubtext}>Complete workouts with this exercise to see your personal records</Text>
+        </View>
+      );
+    }
+
+    const hasPersonalRecords = exerciseStats.bestSet || 
+      (exerciseStats.personalBests && Object.keys(exerciseStats.personalBests).length > 0);
+
+    if (!hasPersonalRecords) {
+      return (
+        <View style={styles.emptyTabContainer}>
+          <Icon name="trophy-outline" size={80} color={COLORS.primaryLight} />
+          <Text style={styles.emptyListText}>No personal records yet</Text>
+          <Text style={styles.emptyListSubtext}>Complete more workouts with this exercise to see your best lifts</Text>
+        </View>
+      );
+    }
+
+    return (
+      <ScrollView 
+        style={{ flex: 1 }} 
+        contentContainerStyle={styles.scrollContent}
+      >
+        {exerciseStats.bestSet && (
+          <View style={styles.bestPerformanceContainer}>
+            <View style={styles.bestPerformanceBadge}>
+              <Icon name="trophy" size={16} color={COLORS.card} />
+              <Text style={styles.bestPerformanceBadgeText}>PERSONAL BEST</Text>
+            </View>
+            
+            <Text style={styles.bestPerformanceTitle}>Best Overall Set</Text>
+            {exerciseStats.bestSetDate && (
+              <Text style={styles.bestPerformanceDate}>
+                {format(new Date(exerciseStats.bestSetDate), 'MMMM d, yyyy')}
+              </Text>
+            )}
+            
+            <View style={styles.bestPerformanceTable}>
+              <View style={styles.bestPerformanceTableHeader}>
+                <Text style={styles.bestPerformanceHeaderCell}>Set</Text>
+                <Text style={styles.bestPerformanceHeaderCell}>Reps</Text>
+                <Text style={styles.bestPerformanceHeaderCell}>Weight</Text>
+                <Text style={styles.bestPerformanceHeaderCell}>Volume</Text>
+              </View>
+              
+              <View style={[styles.bestPerformanceRow, styles.bestPerformanceHighlight]}>
+                <Text style={styles.bestPerformanceCell}>1</Text>
+                <Text style={styles.bestPerformanceCell}>{exerciseStats.bestSet.reps}</Text>
+                <Text style={styles.bestPerformanceCell}>{exerciseStats.bestSet.weight}{exerciseStats.bestSet.unit}</Text>
+                <Text style={styles.bestPerformanceCell}>
+                  {(exerciseStats.bestSet.reps * exerciseStats.bestSet.weight).toFixed(1)}{exerciseStats.bestSet.unit}
+                </Text>
+              </View>
+            </View>
+            
+            <Text style={styles.bestPerformanceNote}>
+              This is your highest volume set (weight × reps)
+            </Text>
+          </View>
+        )}
+
+        {exerciseStats.estimatedOneRepMax && exerciseStats.estimatedOneRepMax > 0 && (
+          <View style={styles.oneRepMaxContainer}>
+            <Text style={styles.oneRepMaxTitle}>Estimated 1-Rep Max</Text>
+            <Text style={styles.oneRepMaxValue}>
+              {exerciseStats.estimatedOneRepMax.toFixed(1)}{exerciseStats.bestSet?.unit || 'kg'}
+            </Text>
+            <Text style={styles.oneRepMaxDescription}>
+              Based on your best set using the Brzycki formula
+            </Text>
+          </View>
+        )}
+
+        {exerciseStats.personalBests && Object.keys(exerciseStats.personalBests).length > 0 && (
+          <View style={styles.bestPerformanceContainer}>
+            <Text style={styles.bestPerformanceTitle}>Best Lifts By Rep Range</Text>
+            
+            <View style={styles.bestPerformanceTable}>
+              <View style={styles.bestPerformanceTableHeader}>
+                <Text style={styles.bestPerformanceHeaderCell}>Reps</Text>
+                <Text style={styles.bestPerformanceHeaderCell}>Weight</Text>
+                <Text style={styles.bestPerformanceHeaderCell}>Date</Text>
+              </View>
+              
+              {Object.entries(exerciseStats.personalBests)
+                .sort(([repsA], [repsB]) => parseInt(repsA) - parseInt(repsB))
+                .map(([reps, best]) => (
+                  <View key={reps} style={styles.bestPerformanceRow}>
+                    <Text style={styles.bestPerformanceCell}>{reps}</Text>
+                    <Text style={styles.bestPerformanceCell}>{best.weight.toFixed(1)}{best.unit}</Text>
+                    <Text style={styles.bestPerformanceCell}>
+                      {best.date ? format(new Date(best.date), 'MMM d, yyyy') : 'N/A'}
+                    </Text>
+                  </View>
+                ))}
+            </View>
+          </View>
+        )}
+      </ScrollView>
+    );
+  };
+
+  // Render suggested weights tab content
+  const renderSuggestedWeightsTab = () => {
+    if (!exerciseStats || !exerciseStats.estimatedOneRepMax || exerciseStats.estimatedOneRepMax <= 0) {
+      return (
+        <View style={styles.emptyTabContainer}>
+          <Icon name="analytics-outline" size={80} color={COLORS.primaryLight} />
+          <Text style={styles.emptyListText}>No data available for suggestions</Text>
+          <Text style={styles.emptyListSubtext}>Complete more workouts with this exercise</Text>
+        </View>
+      );
+    }
+
+    const oneRepMax = exerciseStats.estimatedOneRepMax;
+    const weightUnit = exerciseStats.bestSet?.unit || 'kg';
+
+    // Define rep ranges for suggestions
+    const repRanges = [1, 2, 3, 5, 8, 10, 12, 15];
+
+    return (
+      <ScrollView 
+        style={{ flex: 1 }} 
+        contentContainerStyle={styles.scrollContent}
+      >
+        <View style={styles.oneRepMaxContainer}>
+          <Text style={styles.oneRepMaxTitle}>Estimated 1-Rep Max</Text>
+          <Text style={styles.oneRepMaxValue}>{oneRepMax.toFixed(1)}{weightUnit}</Text>
+          <Text style={styles.oneRepMaxDescription}>
+            Based on your best performance using the Brzycki formula
+          </Text>
+        </View>
+
+        <View style={styles.suggestedWeightsContainer}>
+          <Text style={styles.suggestedWeightsTitle}>Suggested Weights</Text>
+          <Text style={styles.suggestedWeightsDescription}>
+            Based on your estimated 1-rep max of {oneRepMax.toFixed(1)}{weightUnit}
+          </Text>
+          
+          <View style={styles.suggestedWeightsTable}>
+            <View style={styles.suggestedWeightsHeader}>
+              <Text style={styles.suggestedWeightsHeaderCell}>Reps</Text>
+              <Text style={styles.suggestedWeightsHeaderCell}>Weight ({weightUnit})</Text>
+              <Text style={styles.suggestedWeightsHeaderCell}>% of 1RM</Text>
+            </View>
+            
+            {repRanges.map(reps => {
+              const suggestedWeight = calculateSuggestedWeight(oneRepMax, reps);
+              const percentage = (suggestedWeight / oneRepMax) * 100;
+              
+              return (
+                <View key={`reps-${reps}`} style={styles.suggestedWeightsRow}>
+                  <Text style={styles.suggestedWeightsCell}>{reps}</Text>
+                  <Text style={styles.suggestedWeightsCell}>{suggestedWeight.toFixed(1)}</Text>
+                  <Text style={styles.suggestedWeightsCell}>{percentage.toFixed(0)}%</Text>
+                </View>
+              );
+            })}
+          </View>
+          
+          <Text style={styles.suggestedWeightsNote}>
+            These are theoretical values and may vary based on individual factors.
+            Always start with a weight you can safely handle.
+          </Text>
+        </View>
+        
+        <View style={styles.customRepsContainer}>
+          <Text style={styles.customRepsTitle}>Custom Rep Target</Text>
+          <Text style={styles.customRepsValue}>
+            {calculateSuggestedWeight(oneRepMax, suggestedReps).toFixed(1)}{weightUnit}
+          </Text>
+          <Text style={styles.customRepsDescription}>
+            Suggested weight for {suggestedReps} reps
+          </Text>
+        </View>
+      </ScrollView>
+    );
+  };
+
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Exercise History</Text>
       
       <View style={styles.searchContainer}>
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search exercises..."
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-        />
+        <View style={styles.searchInputContainer}>
+          <Ionicons name="search" size={20} color={COLORS.textSecondary} style={styles.searchIcon} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search exercises..."
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholderTextColor={COLORS.textSecondary}
+          />
+        </View>
       </View>
       
       {loading ? (
-        <ActivityIndicator size="large" color="#4CAF50" style={styles.loader} />
+        <ActivityIndicator size="large" color={COLORS.primary} style={styles.loader} />
       ) : (
         <FlatList
           data={filteredExercises}
@@ -372,18 +800,30 @@ export default function ExerciseHistoryScreen() {
               style={styles.exerciseItem}
               onPress={() => handleExercisePress(item)}
             >
+              <View style={styles.exerciseIconContainer}>
+                <Ionicons name={getExerciseIcon(item)} size={22} color={COLORS.primary} />
+              </View>
               <Text style={styles.exerciseName}>{item}</Text>
+              <Ionicons name="chevron-forward" size={20} color={COLORS.textSecondary} />
             </TouchableOpacity>
           )}
           ListEmptyComponent={
-            <Text style={styles.emptyListText}>
-              {searchQuery ? 'No exercises match your search.' : 'No exercises found.'}
-            </Text>
+            <View style={styles.emptyListContainer}>
+              <Ionicons name="search" size={50} color={COLORS.border} />
+              <Text style={styles.emptyListText}>
+                {searchQuery ? 'No exercises match your search.' : 'No exercises found.'}
+              </Text>
+              <Text style={styles.emptyListSubtext}>
+                {searchQuery ? 'Try a different search term.' : 'Complete workouts to see exercise history.'}
+              </Text>
+            </View>
           }
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={filteredExercises.length === 0 ? { flex: 1 } : {}}
         />
       )}
       
-      {/* Exercise Stats Modal */}
+      {/* Exercise Stats Modal with Tabs */}
       <Modal
         animationType="slide"
         transparent={true}
@@ -391,151 +831,62 @@ export default function ExerciseHistoryScreen() {
         onRequestClose={() => setShowStatsModal(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>
-              {selectedExercise} History
-            </Text>
-            
-            {/* Best Performance Section with 1RM */}
-            {bestPerformance ? (
-              <View style={styles.bestPerformanceContainer}>
-                <Text style={styles.bestPerformanceTitle}>Best Performance</Text>
-                <Text style={styles.bestPerformanceDate}>
-                  {formatDate(bestPerformance.date)}
-                </Text>
-                
-                <View style={styles.bestPerformanceTable}>
-                  <View style={styles.bestPerformanceTableHeader}>
-                    <Text style={styles.bestPerformanceHeaderCell}>Set</Text>
-                    <Text style={styles.bestPerformanceHeaderCell}>Reps</Text>
-                    <Text style={styles.bestPerformanceHeaderCell}>Weight</Text>
-                    <Text style={styles.bestPerformanceHeaderCell}>Volume</Text>
-                  </View>
-                  
-                  {bestPerformance.allSets.map((set, index) => {
-                    const reps = parseFloat(set.reps) || 0;
-                    const rawWeight = parseFloat(set.weight) || 0;
-                    const weight = displayWeight(rawWeight, bestPerformance.weightUnit);
-                    const volume = weight * reps;
-                    
-                    return (
-                      <View 
-                        key={`best-set-${index}`} 
-                        style={[
-                          styles.bestPerformanceRow,
-                          index === bestPerformance.setIndex ? styles.bestPerformanceHighlight : null
-                        ]}
-                      >
-                        <Text style={styles.bestPerformanceCell}>{index + 1}</Text>
-                        <Text style={styles.bestPerformanceCell}>{set.reps || '-'}</Text>
-                        <Text style={styles.bestPerformanceCell}>
-                          {weight > 0 ? `${weight.toFixed(1)} ${weightUnit}` : '-'}
-                        </Text>
-                        <Text style={styles.bestPerformanceCell}>{volume.toFixed(1)}</Text>
-                      </View>
-                    );
-                  })}
-                </View>
-                
-                {/* One Rep Max Estimation */}
-                {(() => {
-                  const bestReps = parseFloat(bestPerformance.reps) || 0;
-                  const rawWeight = parseFloat(bestPerformance.weight) || 0;
-                  const bestWeight = displayWeight(rawWeight, bestPerformance.weightUnit);
-                  const oneRepMax = calculateOneRepMax(bestWeight, bestReps);
-                  const suggestedWeight = calculateSuggestedWeight(oneRepMax, suggestedReps);
-                  
-                  return (
-                    <View style={styles.estimationContainer}>
-                      <View style={styles.estimationCard}>
-                        <Text style={styles.estimationTitle}>Estimated 1RM</Text>
-                        <Text style={styles.estimationValue}>
-                          {oneRepMax > 0 ? `${oneRepMax.toFixed(1)} ${weightUnit}` : '-'} 
-                        </Text>
-                        <Text style={styles.estimationLabel}>
-                          Based on {bestWeight.toFixed(1)} {weightUnit} × {bestReps} reps
-                        </Text>
-                      </View>
-                      
-                      <View style={styles.estimationCard}>
-                        <Text style={styles.estimationTitle}>Suggested Weight</Text>
-                        <Text style={styles.estimationValue}>
-                          {suggestedWeight > 0 ? `${suggestedWeight.toFixed(1)} ${weightUnit}` : '-'}
-                        </Text>
-                        <Text style={styles.estimationLabel}>
-                          For {suggestedReps} reps
-                        </Text>
-                      </View>
-                    </View>
-                  );
-                })()}
-                
-                <Text style={styles.bestPerformanceNote}>
-                  Based on data from the last {historyDays} days
-                </Text>
-              </View>
-            ) : (
-              <Text style={styles.noStatsText}>No performance data found</Text>
-            )}
-            
-            <Text style={styles.sectionTitle}>Workout History</Text>
-            
-            {exerciseStats.length === 0 ? (
-              <Text style={styles.noStatsText}>No history found for this exercise</Text>
-            ) : (
-              <ScrollView style={styles.statsList}>
-                {exerciseStats.map((workout, workoutIndex) => (
-                  <View key={`workout-${workoutIndex}`} style={styles.workoutContainer}>
-                    <View style={styles.workoutHeader}>
-                      <Text style={styles.workoutDate}>
-                        {formatDate(workout.date)} - {formatTime(workout.date)}
-                      </Text>
-                    </View>
-                    
-                    <View style={styles.statsHeader}>
-                      <Text style={styles.statsHeaderText}>Set</Text>
-                      <Text style={styles.statsHeaderText}>Reps</Text>
-                      <Text style={styles.statsHeaderText}>Weight</Text>
-                    </View>
-                    
-                    {workout.sets.map((set: ExerciseSet, setIndex: number) => (
-                      <View 
-                        key={`set-${setIndex}`} 
-                        style={[
-                          styles.statsRow,
-                          // Highlight the best performance set
-                          bestPerformance && 
-                          bestPerformance.workoutId === workout.id && 
-                          bestPerformance.setIndex === setIndex 
-                            ? styles.bestPerformanceRow 
-                            : null
-                        ]}
-                      >
-                        <Text style={styles.statsCell}>{setIndex + 1}</Text>
-                        <Text style={styles.statsCell}>{set.reps || '-'}</Text>
-                        <Text style={styles.statsCell}>{set.weight || '-'}</Text>
-                      </View>
-                    ))}
-                  </View>
-                ))}
-              </ScrollView>
-            )}
-            
-            <View style={styles.modalButtonsRow}>
+          <View style={[styles.modalContent, { maxHeight: '90%', height: '90%' }]}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                {selectedExercise}
+              </Text>
               <TouchableOpacity 
-                style={styles.graphsButton}
-                onPress={prepareGraphData}
-                disabled={exerciseStats.length === 0}
-              >
-                <Text style={styles.graphsButtonText}>View Graphs</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={styles.closeModalButton}
+                style={styles.closeButton}
                 onPress={() => setShowStatsModal(false)}
               >
-                <Text style={styles.closeModalButtonText}>Close</Text>
+                <Ionicons name="close" size={24} color={COLORS.textSecondary} />
               </TouchableOpacity>
+            </View>
+            
+            {/* Tabs */}
+            <View style={styles.tabsContainer}>
+              {(['history', 'best', 'suggested'] as TabType[]).map((tab) => (
+                <TouchableOpacity
+                  key={tab}
+                  style={[
+                    styles.tab,
+                    activeTab === tab ? styles.activeTab : null
+                  ]}
+                  onPress={() => {
+                    console.log(`Switching to tab: ${tab}`);
+                    setActiveTab(tab);
+                  }}
+                >
+                  <Ionicons 
+                    name={getTabIcon(tab)} 
+                    size={20} 
+                    color={activeTab === tab ? COLORS.card : COLORS.textSecondary} 
+                    style={styles.tabIcon}
+                  />
+                  <Text 
+                    style={[
+                      styles.tabText,
+                      activeTab === tab ? styles.activeTabText : null
+                    ]}
+                  >
+                    {formatTabName(tab)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            
+            {/* Tab Content */}
+            <View style={{ flex: 1, padding: 0 }}>
+              {exerciseStats ? (
+                renderTabContent()
+              ) : (
+                <View style={styles.emptyTabContainer}>
+                  <Text style={styles.noStatsText}>
+                    {selectedExercise ? 'Loading data...' : 'No exercise selected'}
+                  </Text>
+                </View>
+              )}
             </View>
           </View>
         </View>
@@ -550,9 +901,17 @@ export default function ExerciseHistoryScreen() {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>
-              {selectedExercise} Graphs
-            </Text>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                {selectedExercise} Performance
+              </Text>
+              <TouchableOpacity 
+                style={styles.closeButton}
+                onPress={() => setShowGraphsModal(false)}
+              >
+                <Ionicons name="close" size={24} color={COLORS.textSecondary} />
+              </TouchableOpacity>
+            </View>
             
             <ScrollView style={styles.graphsContainer}>
               <View style={styles.graphSection}>
@@ -561,7 +920,7 @@ export default function ExerciseHistoryScreen() {
                   data={graphData.bestSet}
                   width={chartWidth}
                   height={chartHeight}
-                  color="#4CAF50"
+                  color={COLORS.primary}
                 />
               </View>
               
@@ -571,7 +930,7 @@ export default function ExerciseHistoryScreen() {
                   data={graphData.totalVolume}
                   width={chartWidth}
                   height={chartHeight}
-                  color="#FF9800"
+                  color={COLORS.accent}
                 />
               </View>
               
@@ -581,17 +940,10 @@ export default function ExerciseHistoryScreen() {
                   data={graphData.maxReps}
                   width={chartWidth}
                   height={chartHeight}
-                  color="#2196F3"
+                  color={COLORS.success}
                 />
               </View>
             </ScrollView>
-            
-            <TouchableOpacity 
-              style={styles.closeModalButton}
-              onPress={() => setShowGraphsModal(false)}
-            >
-              <Text style={styles.closeModalButtonText}>Close</Text>
-            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -602,51 +954,99 @@ export default function ExerciseHistoryScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: COLORS.background,
     padding: 20,
   },
   title: {
-    fontSize: 24,
+    fontSize: 26,
     fontWeight: 'bold',
     marginBottom: 20,
     textAlign: 'center',
+    color: COLORS.text,
   },
   searchContainer: {
     marginBottom: 20,
   },
-  searchInput: {
-    backgroundColor: 'white',
+  searchInputContainer: {
+    backgroundColor: COLORS.card,
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: COLORS.border,
     borderRadius: 8,
     padding: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  searchIcon: {
+    marginRight: 12,
+  },
+  searchInput: {
+    flex: 1,
     fontSize: 16,
+    color: COLORS.text,
   },
   loader: {
     marginTop: 50,
   },
   exerciseItem: {
-    backgroundColor: 'white',
-    padding: 15,
-    borderRadius: 8,
+    backgroundColor: COLORS.card,
+    padding: 16,
+    borderRadius: 10,
     marginBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
     borderLeftWidth: 4,
-    borderLeftColor: '#4CAF50',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
+    borderLeftColor: COLORS.primary,
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 2,
+    shadowRadius: 4,
     elevation: 2,
+  },
+  exerciseIconContainer: {
+    marginRight: 12,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: COLORS.primaryLight,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   exerciseName: {
     fontSize: 16,
     fontWeight: '500',
+    color: COLORS.text,
+    flex: 1,
+  },
+  emptyListContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
   },
   emptyListText: {
     textAlign: 'center',
-    marginTop: 50,
-    color: '#888',
+    marginTop: 20,
+    color: COLORS.textSecondary,
     fontSize: 16,
+    fontWeight: '500',
+  },
+  emptyListSubtext: {
+    textAlign: 'center',
+    marginTop: 10,
+    color: COLORS.textSecondary,
+    fontSize: 14,
+  },
+  emptyTabContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+    minHeight: 300,
   },
   modalOverlay: {
     flex: 1,
@@ -656,30 +1056,50 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   modalContent: {
-    backgroundColor: 'white',
-    borderRadius: 10,
-    padding: 20,
+    backgroundColor: COLORS.card,
+    borderRadius: 12,
+    padding: 0,
     width: '100%',
-    maxHeight: '80%',
+    maxHeight: '90%',
+    overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
-      height: 2,
+      height: 4,
     },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 8,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+    backgroundColor: COLORS.primary,
   },
   modalTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    marginBottom: 15,
-    textAlign: 'center',
+    color: COLORS.card,
+    flex: 1,
+  },
+  closeButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   noStatsText: {
     textAlign: 'center',
     padding: 20,
-    color: '#888',
+    color: COLORS.textSecondary,
+    fontSize: 16,
+    fontWeight: '500',
   },
   statsContainer: {
     height: 300,
@@ -687,77 +1107,104 @@ const styles = StyleSheet.create({
   },
   statsHeader: {
     flexDirection: 'row',
-    backgroundColor: '#f0f0f0',
-    paddingVertical: 10,
-    borderTopLeftRadius: 5,
-    borderTopRightRadius: 5,
-    marginBottom: 5,
+    backgroundColor: COLORS.primaryLight,
+    paddingVertical: 12,
+    borderTopLeftRadius: 8,
+    borderTopRightRadius: 8,
   },
   statsHeaderText: {
     flex: 1,
     fontWeight: 'bold',
     textAlign: 'center',
+    color: COLORS.secondary,
   },
   statsList: {
     maxHeight: 300,
+    padding: 10,
   },
   statsRow: {
     flexDirection: 'row',
-    paddingVertical: 8,
+    paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    borderBottomColor: COLORS.border,
   },
   statsCell: {
     flex: 1,
     textAlign: 'center',
+    color: COLORS.text,
+  },
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingVertical: 15,
   },
   modalButtonsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
   },
   graphsButton: {
-    backgroundColor: '#2196F3',
-    paddingVertical: 12,
+    backgroundColor: COLORS.primary,
+    paddingVertical: 14,
     paddingHorizontal: 20,
-    borderRadius: 5,
-    flex: 1,
-    marginRight: 10,
+    borderRadius: 8,
+    marginVertical: 15,
+    marginHorizontal: 20,
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 3,
   },
   graphsButtonText: {
-    color: 'white',
+    color: COLORS.card,
     fontWeight: 'bold',
     textAlign: 'center',
+    fontSize: 15,
   },
   closeModalButton: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: COLORS.primary,
     paddingVertical: 12,
     paddingHorizontal: 20,
     borderRadius: 5,
-    flex: 1,
+    marginTop: 15,
+    marginHorizontal: 20,
+    marginBottom: 20,
+    alignItems: 'center',
   },
   closeModalButtonText: {
-    color: 'white',
+    color: COLORS.card,
     fontWeight: 'bold',
     textAlign: 'center',
   },
   graphsContainer: {
-    marginBottom: 15,
+    padding: 20,
   },
   graphSection: {
-    marginBottom: 20,
+    marginBottom: 25,
+    backgroundColor: COLORS.card,
+    borderRadius: 10,
+    padding: 15,
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
   graphTitle: {
     fontSize: 16,
     fontWeight: 'bold',
-    marginBottom: 10,
+    marginBottom: 15,
     textAlign: 'center',
+    color: COLORS.secondary,
   },
   chart: {
-    backgroundColor: '#f9f9f9',
+    backgroundColor: COLORS.background,
     borderRadius: 8,
     padding: 10,
     borderWidth: 1,
-    borderColor: '#eee',
+    borderColor: COLORS.border,
     position: 'relative',
     justifyContent: 'center',
     alignItems: 'center',
@@ -765,110 +1212,273 @@ const styles = StyleSheet.create({
   axisLabel: {
     position: 'absolute',
     fontSize: 10,
-    color: '#666',
+    color: COLORS.textSecondary,
   },
   noDataText: {
-    color: '#888',
+    color: COLORS.textSecondary,
     fontSize: 14,
   },
   workoutContainer: {
     marginBottom: 20,
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
+    borderColor: COLORS.border,
+    borderRadius: 10,
     overflow: 'hidden',
+    backgroundColor: COLORS.card,
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
   },
   workoutHeader: {
-    backgroundColor: '#e0f2f1',
-    padding: 10,
+    backgroundColor: COLORS.primaryLight,
+    padding: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#ddd',
+    borderBottomColor: COLORS.border,
   },
   workoutDate: {
     fontWeight: 'bold',
     fontSize: 14,
+    color: COLORS.text,
   },
   bestPerformanceContainer: {
-    marginBottom: 20,
+    marginVertical: 15,
+    backgroundColor: COLORS.card,
+    borderRadius: 10,
+    padding: 15,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  bestPerformanceBadge: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.primary,
+    alignSelf: 'center',
+    borderRadius: 20,
+    paddingVertical: 5,
+    paddingHorizontal: 12,
+    marginBottom: 15,
+    alignItems: 'center',
+  },
+  bestPerformanceBadgeText: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: COLORS.card,
+    marginLeft: 6,
   },
   bestPerformanceTitle: {
     fontSize: 18,
     fontWeight: 'bold',
     marginBottom: 10,
+    color: COLORS.primary,
+    textAlign: 'center',
   },
   bestPerformanceDate: {
     fontSize: 14,
     fontWeight: 'bold',
-    marginBottom: 10,
+    marginBottom: 15,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
   },
   bestPerformanceTable: {
-    marginBottom: 10,
+    marginBottom: 15,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 8,
+    overflow: 'hidden',
   },
   bestPerformanceTableHeader: {
     flexDirection: 'row',
-    backgroundColor: '#f0f0f0',
-    paddingVertical: 10,
-    borderTopLeftRadius: 5,
-    borderTopRightRadius: 5,
-    marginBottom: 5,
+    backgroundColor: COLORS.primaryLight,
+    paddingVertical: 12,
   },
   bestPerformanceHeaderCell: {
     flex: 1,
     fontWeight: 'bold',
     textAlign: 'center',
+    color: COLORS.secondary,
   },
   bestPerformanceRow: {
     flexDirection: 'row',
-    paddingVertical: 8,
+    paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    borderBottomColor: COLORS.border,
+    backgroundColor: COLORS.card,
   },
   bestPerformanceHighlight: {
-    backgroundColor: '#e0f2f1',
+    backgroundColor: 'rgba(30, 136, 229, 0.1)',
   },
   bestPerformanceCell: {
     flex: 1,
     textAlign: 'center',
+    color: COLORS.text,
   },
   bestPerformanceNote: {
     fontSize: 12,
-    color: '#888',
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    marginTop: 10,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
     marginBottom: 10,
+    marginHorizontal: 20,
+    color: COLORS.secondary,
   },
-  estimationContainer: {
+  tabsContainer: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginVertical: 15,
-    paddingHorizontal: 5,
+    backgroundColor: COLORS.background,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
   },
-  estimationCard: {
+  tab: {
     flex: 1,
-    backgroundColor: '#f0f0f0',
-    borderRadius: 8,
-    padding: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 5,
+    backgroundColor: COLORS.background,
     alignItems: 'center',
-    marginHorizontal: 5,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
+    flexDirection: 'row',
+    justifyContent: 'center',
   },
-  estimationTitle: {
+  activeTab: {
+    backgroundColor: COLORS.primary,
+  },
+  tabIcon: {
+    marginRight: 6,
+  },
+  tabText: {
     fontSize: 14,
     fontWeight: 'bold',
-    marginBottom: 5,
-    color: '#4CAF50',
+    textAlign: 'center',
+    color: COLORS.textSecondary,
   },
-  estimationValue: {
+  activeTabText: {
+    color: COLORS.card,
+  },
+  tabContent: {
+    flex: 1,
+    minHeight: 400,
+  },
+  oneRepMaxContainer: {
+    marginTop: 15,
+    padding: 20,
+    backgroundColor: COLORS.primaryLight,
+    borderRadius: 10,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.primary,
+  },
+  oneRepMaxTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 10,
+    color: COLORS.secondary,
+  },
+  oneRepMaxValue: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    marginBottom: 10,
+    color: COLORS.primary,
+  },
+  oneRepMaxDescription: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+  },
+  suggestedWeightsContainer: {
+    marginVertical: 15,
+    backgroundColor: COLORS.card,
+    borderRadius: 10,
+    padding: 15,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  suggestedWeightsTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    marginBottom: 3,
+    marginBottom: 10,
+    color: COLORS.primary,
+    textAlign: 'center',
   },
-  estimationLabel: {
+  suggestedWeightsDescription: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    marginBottom: 15,
+  },
+  suggestedWeightsTable: {
+    marginBottom: 15,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  suggestedWeightsHeader: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.primaryLight,
+    paddingVertical: 12,
+    paddingHorizontal: 5,
+  },
+  suggestedWeightsHeaderCell: {
+    flex: 1,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    color: COLORS.secondary,
+  },
+  suggestedWeightsRow: {
+    flexDirection: 'row',
+    paddingVertical: 12,
+    paddingHorizontal: 5,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+    backgroundColor: COLORS.card,
+  },
+  suggestedWeightsCell: {
+    flex: 1,
+    textAlign: 'center',
+    color: COLORS.text,
+  },
+  suggestedWeightsNote: {
     fontSize: 12,
-    color: '#666',
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    marginBottom: 15,
+    fontStyle: 'italic',
+  },
+  customRepsContainer: {
+    padding: 20,
+    backgroundColor: COLORS.primaryLight,
+    borderRadius: 10,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.primary,
+  },
+  customRepsTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 10,
+    color: COLORS.secondary,
+  },
+  customRepsValue: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    marginBottom: 10,
+    color: COLORS.primary,
+  },
+  customRepsDescription: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
     textAlign: 'center',
   },
 }); 

@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as healthService from './healthService';
-import { Platform } from 'react';
+import { Platform } from 'react-native';
 
 // Types
 export interface Exercise {
@@ -307,7 +307,8 @@ export const getExerciseStats = async (exerciseName: string): Promise<any[]> => 
 // Save active workout for resuming later
 export const saveActiveWorkout = async (
   exercises: Exercise[],
-  weightUnit?: string
+  weightUnit?: string,
+  timestamp?: string
 ): Promise<boolean> => {
   try {
     // If exercises is empty, clear the active workout
@@ -318,7 +319,7 @@ export const saveActiveWorkout = async (
     
     const activeWorkout = {
       exercises,
-      timestamp: new Date().toISOString(),
+      timestamp: timestamp || new Date().toISOString(),
       weightUnit: weightUnit || 'kg'
     };
     
