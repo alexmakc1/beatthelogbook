@@ -14,6 +14,7 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as storageService from '../../../services/storageService';
 import { COLORS } from '../../../services/colors';
+import { Ionicons } from '@expo/vector-icons';
 
 type Exercise = storageService.Exercise;
 type Set = storageService.Set;
@@ -149,6 +150,11 @@ export default function EditWorkoutScreen() {
     }
   };
 
+  // Function to handle going back
+  const handleBack = () => {
+    router.back();
+  };
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -169,12 +175,24 @@ export default function EditWorkoutScreen() {
   return (
     <KeyboardAvoidingView 
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={100}
     >
+      <View style={styles.header}>
+        <TouchableOpacity onPress={handleBack} style={styles.backButton}>
+          <Ionicons name="arrow-back" size={24} color={COLORS.primary} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Edit Workout</Text>
+        <TouchableOpacity onPress={saveWorkout} style={styles.saveButton} disabled={saving}>
+          {saving ? (
+            <ActivityIndicator size="small" color={COLORS.primary} />
+          ) : (
+            <Ionicons name="save" size={24} color={COLORS.primary} />
+          )}
+        </TouchableOpacity>
+      </View>
+      
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        <Text style={styles.title}>Edit Workout</Text>
-        
         {exercises.map((exercise) => (
           <View key={exercise.id} style={styles.exerciseCard}>
             <View style={styles.exerciseHeader}>
@@ -243,27 +261,6 @@ export default function EditWorkoutScreen() {
           <Text style={styles.addButtonText}>Add Exercise</Text>
         </TouchableOpacity>
       </ScrollView>
-      
-      <View style={styles.buttonContainer}>
-        <TouchableOpacity 
-          style={styles.cancelButton}
-          onPress={() => router.back()}
-          disabled={saving}
-        >
-          <Text style={styles.cancelButtonText}>Cancel</Text>
-        </TouchableOpacity>
-        <TouchableOpacity 
-          style={[styles.saveButton, saving && styles.disabledButton]}
-          onPress={saveWorkout}
-          disabled={saving}
-        >
-          {saving ? (
-            <ActivityIndicator size="small" color={COLORS.card} />
-          ) : (
-            <Text style={styles.saveButtonText}>Save Changes</Text>
-          )}
-        </TouchableOpacity>
-      </View>
     </KeyboardAvoidingView>
   );
 }
@@ -272,7 +269,29 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
-    paddingBottom: 80, // Space for the bottom buttons
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'ios' ? 50 : 16,
+    paddingBottom: 8,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  backButton: {
+    padding: 8,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    flex: 1,
+    textAlign: 'center',
+  },
+  saveButton: {
+    padding: 8,
   },
   scrollContent: {
     padding: 20,
@@ -398,44 +417,5 @@ const styles = StyleSheet.create({
   addButtonText: {
     color: COLORS.success,
     fontWeight: 'bold',
-  },
-  buttonContainer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    padding: 15,
-    backgroundColor: COLORS.background,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-  },
-  cancelButton: {
-    flex: 1,
-    padding: 15,
-    borderRadius: 5,
-    alignItems: 'center',
-    backgroundColor: COLORS.background,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    marginRight: 10,
-  },
-  cancelButtonText: {
-    color: COLORS.textSecondary,
-    fontWeight: 'bold',
-  },
-  saveButton: {
-    flex: 2,
-    backgroundColor: COLORS.success,
-    padding: 15,
-    borderRadius: 5,
-    alignItems: 'center',
-  },
-  saveButtonText: {
-    color: COLORS.card,
-    fontWeight: 'bold',
-  },
-  disabledButton: {
-    opacity: 0.7,
   },
 }); 

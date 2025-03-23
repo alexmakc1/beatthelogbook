@@ -8,12 +8,14 @@ import {
   ActivityIndicator,
   Alert,
   TextInput,
-  Modal
+  Modal,
+  Platform
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as storageService from '../../services/storageService';
 import { Swipeable } from 'react-native-gesture-handler';
 import { COLORS } from '../../services/colors';
+import { Ionicons } from '@expo/vector-icons';
 
 interface Template {
   id: string;
@@ -121,6 +123,11 @@ export default function TemplatesScreen() {
     );
   };
 
+  // Function to handle going back
+  const handleBack = () => {
+    router.back();
+  };
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -132,7 +139,13 @@ export default function TemplatesScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.header}>Workout Templates</Text>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={handleBack} style={styles.backButton}>
+          <Ionicons name="arrow-back" size={24} color={COLORS.primary} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Workout Templates</Text>
+        <View style={styles.headerRight} />
+      </View>
       
       {templates.length === 0 ? (
         <View style={styles.emptyContainer}>
@@ -222,10 +235,27 @@ const styles = StyleSheet.create({
     padding: 15,
   },
   header: {
-    fontSize: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'ios' ? 50 : 16,
+    paddingBottom: 8,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  backButton: {
+    padding: 8,
+  },
+  headerTitle: {
+    fontSize: 18,
     fontWeight: 'bold',
-    marginBottom: 15,
-    color: COLORS.text,
+    flex: 1,
+    textAlign: 'center',
+  },
+  headerRight: {
+    width: 40,
   },
   listContainer: {
     flex: 1,

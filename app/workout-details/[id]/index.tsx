@@ -8,12 +8,14 @@ import {
   TouchableOpacity,
   Alert,
   Modal,
-  TextInput
+  TextInput,
+  Platform
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as storageService from '../../../services/storageService';
 import * as settingsService from '../../../services/settingsService';
 import { COLORS } from '../../../services/colors';
+import { Ionicons } from '@expo/vector-icons';
 
 type Workout = storageService.Workout;
 
@@ -29,6 +31,11 @@ export default function WorkoutDetailsScreen() {
   const [startTimeInput, setStartTimeInput] = useState('');
   const [durationInput, setDurationInput] = useState('');
   const [weightUnit, setWeightUnit] = useState<settingsService.WeightUnit>(settingsService.DEFAULT_WEIGHT_UNIT);
+
+  // Function to handle going back
+  const handleBack = () => {
+    router.back();
+  };
 
   useEffect(() => {
     loadSettings();
@@ -218,7 +225,7 @@ export default function WorkoutDetailsScreen() {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#4CAF50" />
+        <ActivityIndicator size="large" color={COLORS.primary} />
         <Text>Loading workout details...</Text>
       </View>
     );
@@ -234,9 +241,29 @@ export default function WorkoutDetailsScreen() {
 
   return (
     <View style={styles.container}>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={handleBack} style={styles.backButton}>
+          <Ionicons name="arrow-back" size={24} color={COLORS.primary} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Workout Details</Text>
+        <View style={styles.headerRight}>
+          {workout && (
+            <TouchableOpacity onPress={() => setShowTemplateModal(true)}>
+              <Ionicons name="save-outline" size={24} color={COLORS.primary} />
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+      
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        <Text style={styles.title}>Workout Details</Text>
-        <Text style={styles.dateText}>{formatDate(workout.date)}</Text>
+        <View style={styles.workoutDate}>
+          <Text style={styles.dateText}>
+            {workout?.date ? formatDate(workout.date) : 'No date available'}
+          </Text>
+          <TouchableOpacity style={styles.editTimeButton} onPress={() => setShowTimeModal(true)}>
+            <Text style={styles.editTimeButtonText}>Edit Time</Text>
+          </TouchableOpacity>
+        </View>
         
         <View style={styles.summaryContainer}>
           <Text style={styles.summaryText}>
@@ -270,8 +297,14 @@ export default function WorkoutDetailsScreen() {
               onPress={() => navigateToExerciseHistory(exercise.name)}
               style={styles.exerciseNameContainer}
             >
-              <Text style={styles.exerciseName}>{exercise.name}</Text>
-              <Text style={styles.viewHistoryText}>View History →</Text>
+              <View style={styles.exerciseNameWrapper}>
+                <Text style={styles.exerciseName} numberOfLines={2} ellipsizeMode="tail">
+                  {exercise.name}
+                </Text>
+              </View>
+              <View style={styles.viewHistoryWrapper}>
+                <Text style={styles.viewHistoryText}>View History →</Text>
+              </View>
             </TouchableOpacity>
             
             <View style={styles.setsContainer}>
@@ -416,6 +449,30 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background,
     paddingBottom: 80, // Space for the button container
   },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'ios' ? 50 : 16,
+    paddingBottom: 8,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  backButton: {
+    padding: 8,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    flex: 1,
+    textAlign: 'center',
+  },
+  headerRight: {
+    width: 40,
+    alignItems: 'flex-end',
+  },
   scrollContent: {
     padding: 20,
     paddingBottom: 80, // Make room for button
@@ -434,12 +491,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: 'red',
   },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 5,
-    textAlign: 'center',
-    color: COLORS.text,
+  workoutDate: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 20,
   },
   dateText: {
     fontSize: 16,
@@ -475,11 +531,27 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 15,
+    flexWrap: 'wrap',
+  },
+  exerciseNameWrapper: {
+    flex: 1,
+    marginRight: 10,
   },
   exerciseName: {
     fontSize: 18,
     fontWeight: 'bold',
     color: COLORS.text,
+  },
+  viewHistoryWrapper: {
+    minWidth: 80,
+    justifyContent: 'center',
+  },
+  viewHistoryText: {
+    fontSize: 14,
+    color: COLORS.primary,
+    fontWeight: '500',
+    paddingVertical: 5,
+    textAlign: 'right',
   },
   setsContainer: {
     marginTop: 5,
@@ -654,10 +726,5 @@ const styles = StyleSheet.create({
     marginBottom: 5,
     marginTop: 10,
     color: COLORS.text,
-  },
-  viewHistoryText: {
-    fontSize: 14,
-    color: COLORS.primary,
-    fontWeight: '500',
   },
 }); 

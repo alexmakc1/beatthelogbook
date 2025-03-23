@@ -10,7 +10,8 @@ import {
   Modal,
   ScrollView,
   Dimensions,
-  Alert
+  Alert,
+  Platform
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as storageService from '../../services/storageService';
@@ -772,9 +773,30 @@ export default function ExerciseHistoryScreen() {
     );
   };
 
+  // Function to handle going back
+  const handleBack = () => {
+    router.back();
+  };
+
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Exercise History</Text>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={handleBack} style={styles.backButton}>
+          <Ionicons name="arrow-back" size={24} color={COLORS.primary} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>{selectedExercise || 'Exercise History'}</Text>
+        <View style={styles.headerRight}>
+          {selectedExercise && (
+            <TouchableOpacity onPress={() => setShowGraphsModal(true)}>
+              <Ionicons 
+                name={showGraphsModal ? "stats-chart" : "stats-chart-outline"} 
+                size={24} 
+                color={COLORS.primary} 
+              />
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
       
       <View style={styles.searchContainer}>
         <View style={styles.searchInputContainer}>
@@ -956,6 +978,31 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.background,
     padding: 20,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'ios' ? 50 : 16,
+    paddingBottom: 8,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  backButton: {
+    padding: 8,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    flex: 1,
+    textAlign: 'center',
+    color: COLORS.text,
+  },
+  headerRight: {
+    width: 40,
+    alignItems: 'flex-end',
   },
   title: {
     fontSize: 26,

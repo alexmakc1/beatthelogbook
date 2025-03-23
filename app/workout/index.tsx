@@ -113,13 +113,13 @@ export default function WorkoutScreen() {
       // Use timestamp from state if available
       const timestamp = workoutStartTime ? workoutStartTime.toISOString() : new Date().toISOString();
       storageService.saveActiveWorkout(exercises, weightUnit, timestamp).catch(error => {
-        console.error('Error saving active workout:', error);
-      });
-      
+      console.error('Error saving active workout:', error);
+    });
+    
       // Start timer when exercises are added and timer not running
       if (!workoutStarted) {
         console.log("Starting timer from exercises change useEffect");
-        startWorkoutTimer();
+      startWorkoutTimer();
       }
     }
   }, [exercises, weightUnit]);
@@ -774,15 +774,27 @@ export default function WorkoutScreen() {
     }
   };
 
+  // Function to handle going back to the main screen
+  const handleBack = () => {
+    router.back();
+  };
+  
   return (
     <View style={styles.container} key={`workout-container-${forceRefreshKey}`}>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={handleBack} style={styles.backButton}>
+          <Ionicons name="arrow-back" size={24} color={COLORS.primary} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Workout</Text>
+        <View style={styles.headerRight} />
+      </View>
       <ScrollView contentContainerStyle={styles.contentContainer}>
         <Text style={styles.title}>Workout Session</Text>
         
         {workoutStarted && (
           <View style={styles.timerContainer}>
             <Text style={styles.timerLabel}>Workout Time</Text>
-            <Text style={styles.timerText}>{formatTime(elapsedTime)}</Text>
+            <Text style={styles.timerDisplay}>{formatTime(elapsedTime)}</Text>
           </View>
         )}
       
@@ -986,9 +998,9 @@ export default function WorkoutScreen() {
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { maxHeight: '90%', height: '90%' }]}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>
+            <Text style={styles.modalTitle}>
                 {selectedExercise}
-              </Text>
+            </Text>
               <TouchableOpacity 
                 style={styles.closeButton}
                 onPress={() => setShowStatsModal(false)}
@@ -1085,7 +1097,7 @@ export default function WorkoutScreen() {
                     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 15 }}>
                       {exerciseStats.bestSet ? (
                         <>
-                          <View style={styles.bestPerformanceContainer}>
+              <View style={styles.bestPerformanceContainer}>
                             <View style={styles.bestPerformanceBadge}>
                               <Ionicons name="trophy" size={16} color="#fff" />
                               <Text style={styles.bestPerformanceBadgeText}>PERSONAL BEST</Text>
@@ -1093,47 +1105,47 @@ export default function WorkoutScreen() {
                             
                             <Text style={styles.bestPerformanceTitle}>Best Overall Set</Text>
                             {exerciseStats.bestSetDate && (
-                              <Text style={styles.bestPerformanceDate}>
+                <Text style={styles.bestPerformanceDate}>
                                 {new Date(exerciseStats.bestSetDate).toLocaleDateString()}
-                              </Text>
+                </Text>
                             )}
-                            
-                            <View style={styles.bestPerformanceTable}>
-                              <View style={styles.bestPerformanceTableHeader}>
-                                <Text style={styles.bestPerformanceHeaderCell}>Set</Text>
-                                <Text style={styles.bestPerformanceHeaderCell}>Reps</Text>
-                                <Text style={styles.bestPerformanceHeaderCell}>Weight</Text>
-                                <Text style={styles.bestPerformanceHeaderCell}>Volume</Text>
-                              </View>
-                              
+                
+                <View style={styles.bestPerformanceTable}>
+                  <View style={styles.bestPerformanceTableHeader}>
+                    <Text style={styles.bestPerformanceHeaderCell}>Set</Text>
+                    <Text style={styles.bestPerformanceHeaderCell}>Reps</Text>
+                    <Text style={styles.bestPerformanceHeaderCell}>Weight</Text>
+                    <Text style={styles.bestPerformanceHeaderCell}>Volume</Text>
+                  </View>
+                  
                               <View style={[styles.bestPerformanceRow, styles.bestPerformanceHighlight]}>
                                 <Text style={styles.bestPerformanceCell}>1</Text>
                                 <Text style={styles.bestPerformanceCell}>{exerciseStats.bestSet.reps}</Text>
-                                <Text style={styles.bestPerformanceCell}>
+                        <Text style={styles.bestPerformanceCell}>
                                   {exerciseStats.bestSet.weight}{exerciseStats.bestSet.unit}
-                                </Text>
+                        </Text>
                                 <Text style={styles.bestPerformanceCell}>
                                   {(exerciseStats.bestSet.reps * exerciseStats.bestSet.weight).toFixed(1)}
                                   {exerciseStats.bestSet.unit}
                                 </Text>
-                              </View>
-                            </View>
-                            
+                      </View>
+                </View>
+                
                             <Text style={styles.bestPerformanceNote}>
                               This is your highest volume set (weight × reps)
-                            </Text>
-                          </View>
-
+                        </Text>
+                      </View>
+                      
                           {exerciseStats.estimatedOneRepMax && exerciseStats.estimatedOneRepMax > 0 && (
                             <View style={styles.oneRepMaxContainer}>
                               <Text style={styles.oneRepMaxTitle}>Estimated 1-Rep Max</Text>
                               <Text style={styles.oneRepMaxValue}>
                                 {exerciseStats.estimatedOneRepMax.toFixed(1)}{exerciseStats.bestSet.unit || 'kg'}
-                              </Text>
+                        </Text>
                               <Text style={styles.oneRepMaxDescription}>
                                 Based on your best set using the Brzycki formula
-                              </Text>
-                            </View>
+                        </Text>
+                      </View>
                           )}
 
                           {exerciseStats.personalBests && Object.keys(exerciseStats.personalBests).length > 0 && (
@@ -1145,7 +1157,7 @@ export default function WorkoutScreen() {
                                   <Text style={styles.bestPerformanceHeaderCell}>Reps</Text>
                                   <Text style={styles.bestPerformanceHeaderCell}>Weight</Text>
                                   <Text style={styles.bestPerformanceHeaderCell}>Date</Text>
-                                </View>
+                    </View>
                                 
                                 {Object.entries(exerciseStats.personalBests)
                                   .sort(([repsA], [repsB]) => parseInt(repsA) - parseInt(repsB))
@@ -1157,8 +1169,8 @@ export default function WorkoutScreen() {
                                       </Text>
                                       <Text style={styles.bestPerformanceCell}>
                                         {best.date ? new Date(best.date).toLocaleDateString() : 'N/A'}
-                                      </Text>
-                                    </View>
+                </Text>
+              </View>
                                   ))}
                               </View>
                             </View>
@@ -1188,9 +1200,9 @@ export default function WorkoutScreen() {
                             </Text>
                             <Text style={styles.oneRepMaxDescription}>
                               Based on your best performance using the Brzycki formula
-                            </Text>
-                          </View>
-
+                      </Text>
+                    </View>
+                    
                           <View style={styles.suggestedWeightsContainer}>
                             <Text style={styles.suggestedWeightsTitle}>Suggested Weights</Text>
                             <Text style={styles.suggestedWeightsDescription}>
@@ -1204,16 +1216,16 @@ export default function WorkoutScreen() {
                                   Weight ({exerciseStats.bestSet?.unit || 'kg'})
                                 </Text>
                                 <Text style={styles.suggestedWeightsHeaderCell}>% of 1RM</Text>
-                              </View>
-                              
+                    </View>
+                    
                               {[1, 2, 3, 5, 8, 10, 12, 15].map(reps => {
                                 const suggestedWeight = calculateSuggestedWeight(
                                   exerciseStats.estimatedOneRepMax || 0, 
                                   reps
                                 );
                                 const percentage = (suggestedWeight / (exerciseStats.estimatedOneRepMax || 1)) * 100;
-                                
-                                return (
+                      
+                      return (
                                   <View key={`reps-${reps}`} style={styles.suggestedWeightsRow}>
                                     <Text style={styles.suggestedWeightsCell}>{reps}</Text>
                                     <Text style={styles.suggestedWeightsCell}>
@@ -1221,11 +1233,11 @@ export default function WorkoutScreen() {
                                     </Text>
                                     <Text style={styles.suggestedWeightsCell}>
                                       {percentage.toFixed(0)}%
-                                    </Text>
-                                  </View>
-                                );
-                              })}
-                            </View>
+                          </Text>
+                        </View>
+                      );
+                    })}
+                  </View>
                             
                             <Text style={styles.suggestedWeightsNote}>
                               These are theoretical values and may vary based on individual factors.
@@ -1242,18 +1254,18 @@ export default function WorkoutScreen() {
                           </Text>
                         </View>
                       )}
-                    </ScrollView>
-                  )}
-                  
-                  <TouchableOpacity 
-                    style={styles.viewFullHistoryButton}
-                    onPress={() => {
-                      setShowStatsModal(false);
-                      navigateToExerciseHistory(selectedExercise);
-                    }}
-                  >
-                    <Text style={styles.viewFullHistoryButtonText}>View Full History</Text>
-                  </TouchableOpacity>
+              </ScrollView>
+            )}
+            
+            <TouchableOpacity 
+              style={styles.viewFullHistoryButton}
+              onPress={() => {
+                setShowStatsModal(false);
+                navigateToExerciseHistory(selectedExercise);
+              }}
+            >
+              <Text style={styles.viewFullHistoryButtonText}>View Full History</Text>
+            </TouchableOpacity>
                 </>
               )}
             </View>
@@ -1268,6 +1280,50 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'ios' ? 50 : 16,
+    paddingBottom: 8,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+    zIndex: 10,
+  },
+  backButton: {
+    padding: 8,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    flex: 1,
+    textAlign: 'center',
+  },
+  headerRight: {
+    width: 40,
+  },
+  timerContainer: {
+    backgroundColor: COLORS.primaryLight,
+    borderRadius: 10,
+    padding: 15,
+    marginBottom: 20,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.primary,
+  },
+  timerLabel: {
+    fontSize: 16,
+    color: COLORS.text,
+    marginBottom: 5,
+  },
+  timerDisplay: {
+    color: COLORS.primary,
+    fontSize: 24,
+    fontWeight: 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
   contentContainer: {
     padding: 20,
@@ -1770,29 +1826,6 @@ const styles = StyleSheet.create({
     color: COLORS.card,
     fontWeight: 'bold',
     fontSize: 15,
-  },
-  timerContainer: {
-    backgroundColor: COLORS.primary,
-    borderRadius: 10,
-    padding: 15,
-    marginBottom: 20,
-    alignItems: 'center',
-    shadowColor: COLORS.shadow,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
-    elevation: 3,
-  },
-  timerLabel: {
-    color: 'rgba(255, 255, 255, 0.9)',
-    fontSize: 14,
-    marginBottom: 5,
-  },
-  timerText: {
-    color: COLORS.card,
-    fontSize: 24,
-    fontWeight: 'bold',
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
   confirmModalContent: {
     backgroundColor: COLORS.card,

@@ -476,8 +476,29 @@ export default function HistoryScreen() {
     }
   };
 
+  // Function to handle going back
+  const handleBack = () => {
+    router.back();
+  };
+
   return (
     <View style={styles.container}>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={handleBack} style={styles.backButton}>
+          <MaterialIcons name="arrow-back" size={24} color={COLORS.primary} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Workout History</Text>
+        <View style={styles.headerRight}>
+          <TouchableOpacity onPress={() => setViewMode(viewMode === 'list' ? 'calendar' : 'list')}>
+            <MaterialIcons 
+              name={viewMode === 'list' ? 'calendar-today' : 'list'} 
+              size={24} 
+              color={COLORS.primary} 
+            />
+          </TouchableOpacity>
+        </View>
+      </View>
+
       {renderContent()}
       
       {/* Bottom Navigation Bar */}
@@ -531,9 +552,27 @@ const styles = StyleSheet.create({
   },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'ios' ? 50 : 16,
+    paddingBottom: 8,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  backButton: {
+    padding: 8,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    flex: 1,
+    textAlign: 'center',
+  },
+  headerRight: {
+    width: 40,
+    alignItems: 'flex-end',
   },
   loadingContainer: {
     flex: 1,
