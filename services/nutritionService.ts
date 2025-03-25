@@ -1,11 +1,64 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { searchLocalFoods } from './commonFoods';
+import crypto from 'crypto-js';
 
 // API constants
-const NUTRITION_API_BASE_URL = 'https://api.api-ninjas.com/v1/nutrition';
-const API_KEY = 'YOUR_API_NINJA_KEY'; // Replace with your actual API key
+const FATSECRET_API_BASE_URL = 'https://platform.fatsecret.com/rest/server.api';
+
+// OAuth 1.0 credentials - these should be stored in environment variables in production
+const FATSECRET_CONSUMER_KEY = 'f45e56444b9e4bbabdbe80b6b6ba1725';  
+const FATSECRET_CONSUMER_SECRET = '94ebd77b8baa4c6cbea00bd401dc2ca2';
 
 // Types
+export interface FatSecretFood {
+  food_id: string;
+  food_name: string;
+  food_type: string;
+  food_url: string;
+  brand_name?: string;
+}
+
+export interface FatSecretServing {
+  serving_id: string;
+  serving_description: string;
+  serving_url: string;
+  metric_serving_amount?: string;
+  metric_serving_unit?: string;
+  number_of_units?: string;
+  measurement_description?: string;
+  is_default?: string;
+  calories: string;
+  carbohydrate: string;
+  protein: string;
+  fat: string;
+  saturated_fat?: string;
+  polyunsaturated_fat?: string;
+  monounsaturated_fat?: string;
+  trans_fat?: string;
+  cholesterol?: string;
+  sodium?: string;
+  potassium?: string;
+  fiber?: string;
+  sugar?: string;
+  vitamin_a?: string;
+  vitamin_c?: string;
+  calcium?: string;
+  iron?: string;
+}
+
+export interface FatSecretFoodDetails {
+  food_id: string;
+  food_name: string;
+  food_type: string;
+  food_url: string;
+  brand_name?: string;
+  servings: {
+    serving: FatSecretServing | FatSecretServing[];
+  };
+}
+
+// Converted format to match our app's needs
 export interface NutritionItem {
   name: string;
   calories: number;
@@ -19,6 +72,8 @@ export interface NutritionItem {
   carbohydrates_total_g: number;
   fiber_g: number;
   sugar_g: number;
+  food_id?: string; // Added for FatSecret
+  brand_name?: string; // Added for FatSecret
 }
 
 export interface DiaryEntry {
@@ -57,21 +112,211 @@ export const formatDateToYYYYMMDD = (date: Date): string => {
   return `${year}-${month}-${day}`;
 };
 
+// Generate OAuth 1.0 signature
+const generateOAuthSignature = (
+  method: string,
+  url: string,
+  params: Record<string, string>,
+  consumerSecret: string
+): string => {
+  // Sort parameters alphabetically
+  const sortedParams = Object.keys(params)
+    .sort()
+    .reduce((acc: Record<string, string>, key) => {
+      acc[key] = params[key];
+      return acc;
+    }, {});
+
+  // Create parameter string
+  const paramString = Object.entries(sortedParams)
+    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+    .join('&');
+
+  // Create signature base string
+  const signatureBaseString = [
+    method.toUpperCase(),
+    encodeURIComponent(url),
+    encodeURIComponent(paramString)
+  ].join('&');
+
+  // Create signing key (consumer secret + '&')
+  const signingKey = `${encodeURIComponent(consumerSecret)}&`;
+
+  // Generate signature
+  const signature = crypto.HmacSHA1(signatureBaseString, signingKey).toString(crypto.enc.Base64);
+
+  return signature;
+};
+
+// Create OAuth 1.0 parameters
+const createOAuthParams = (additionalParams: Record<string, string> = {}): Record<string, string> => {
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const nonce = Math.random().toString(36).substring(2) + timestamp;
+
+  const oauthParams: Record<string, string> = {
+    oauth_consumer_key: FATSECRET_CONSUMER_KEY,
+    oauth_nonce: nonce,
+    oauth_signature_method: 'HMAC-SHA1',
+    oauth_timestamp: timestamp,
+    oauth_version: '1.0',
+    format: 'json',
+    ...additionalParams
+  };
+
+  // Generate signature
+  const signature = generateOAuthSignature(
+    'POST',
+    FATSECRET_API_BASE_URL,
+    oauthParams,
+    FATSECRET_CONSUMER_SECRET
+  );
+
+  // Add signature to params
+  oauthParams.oauth_signature = signature;
+
+  return oauthParams;
+};
+
+// Convert FatSecret serving data to our NutritionItem format
+const convertToNutritionItem = (food: FatSecretFood, serving: FatSecretServing): NutritionItem => {
+  // Default serving size to 100g if not specified
+  const servingSize = serving.metric_serving_amount 
+    ? parseFloat(serving.metric_serving_amount) 
+    : 100;
+  
+  return {
+    name: food.food_name,
+    food_id: food.food_id,
+    brand_name: food.brand_name,
+    calories: parseInt(serving.calories) || 0,
+    serving_size_g: servingSize,
+    fat_total_g: parseFloat(serving.fat) || 0,
+    fat_saturated_g: parseFloat(serving.saturated_fat || '0') || 0,
+    protein_g: parseFloat(serving.protein) || 0,
+    sodium_mg: parseFloat(serving.sodium || '0') || 0,
+    potassium_mg: parseFloat(serving.potassium || '0') || 0,
+    cholesterol_mg: parseFloat(serving.cholesterol || '0') || 0,
+    carbohydrates_total_g: parseFloat(serving.carbohydrate) || 0,
+    fiber_g: parseFloat(serving.fiber || '0') || 0,
+    sugar_g: parseFloat(serving.sugar || '0') || 0,
+  };
+};
+
 // Search for nutrition information
 export const searchNutrition = async (query: string): Promise<NutritionItem[]> => {
   try {
-    const response = await axios.get(NUTRITION_API_BASE_URL, {
-      params: { query },
-      headers: { 'X-Api-Key': API_KEY }
+    // Create OAuth parameters
+    const params = createOAuthParams({
+      method: 'foods.search',
+      search_expression: query,
+      max_results: '50'
+    });
+
+    // Convert params to URLSearchParams
+    const searchParams = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      searchParams.append(key, value);
+    });
+
+    // Make API request
+    const response = await axios({
+      method: 'post',
+      url: FATSECRET_API_BASE_URL,
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      data: searchParams.toString(),
+      timeout: 10000, // Add timeout to prevent long hanging requests
     });
 
     // Save to recent searches
     await saveRecentSearch(query);
     
-    return response.data;
-  } catch (error) {
+    const results = response.data;
+    
+    // Handle no results case
+    if (!results.foods || !results.foods.food) {
+      return [];
+    }
+    
+    // Convert to array if single result
+    const foodItems = Array.isArray(results.foods.food) 
+      ? results.foods.food 
+      : [results.foods.food];
+    
+    // Get detailed nutrition for each food
+    const nutritionItems: NutritionItem[] = [];
+    
+    // Process each food item (we'll get details as needed when user selects a food)
+    for (const food of foodItems) {
+      try {
+        const details = await getFoodDetails(food.food_id);
+        nutritionItems.push(details);
+      } catch (error) {
+        console.error(`Error getting details for food ${food.food_id}:`, error);
+        // Skip this food item
+      }
+    }
+    
+    return nutritionItems;
+  } catch (error: any) {
     console.error('Error searching nutrition:', error);
-    throw new Error('Failed to fetch nutrition data');
+    
+    // Fall back to local database
+    console.log('Falling back to local food database');
+    
+    // Save to recent searches anyway
+    await saveRecentSearch(query);
+    
+    // Return results from local database
+    return searchLocalFoods(query);
+  }
+};
+
+// Get food details by ID
+export const getFoodDetails = async (foodId: string): Promise<NutritionItem> => {
+  try {
+    // Create OAuth parameters
+    const params = createOAuthParams({
+      method: 'food.get',
+      food_id: foodId
+    });
+
+    // Convert params to URLSearchParams
+    const searchParams = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      searchParams.append(key, value);
+    });
+
+    // Make API request
+    const response = await axios({
+      method: 'post',
+      url: FATSECRET_API_BASE_URL,
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      data: searchParams.toString(),
+      timeout: 10000, // Add timeout to prevent long hanging requests
+    });
+    
+    const foodData = response.data.food as FatSecretFoodDetails;
+    
+    // Get the default serving or first serving
+    let servingData: FatSecretServing;
+    
+    if (Array.isArray(foodData.servings.serving)) {
+      // Find the default serving or use the first one
+      const defaultServing = foodData.servings.serving.find(s => s.is_default === "1");
+      servingData = defaultServing || foodData.servings.serving[0];
+    } else {
+      servingData = foodData.servings.serving;
+    }
+    
+    // Convert to our format
+    return convertToNutritionItem(foodData, servingData);
+  } catch (error) {
+    console.error('Error getting food details:', error);
+    throw new Error('Failed to fetch food details');
   }
 };
 
@@ -300,6 +545,40 @@ export const getDiaryEntriesForDateRange = async (startDate: string, endDate: st
     return allEntries;
   } catch (error) {
     console.error('Error getting diary entries for date range:', error);
+    return [];
+  }
+};
+
+// Get nutrition trends for the date range
+export const getNutritionTrends = async (startDate: string, endDate: string): Promise<{ date: string; totals: { calories: number; protein: number; carbs: number; fat: number; } }[]> => {
+  try {
+    const diaryJson = await AsyncStorage.getItem(DIARY_STORAGE_KEY);
+    if (!diaryJson) return [];
+    
+    const diary = JSON.parse(diaryJson);
+    const trends: { date: string; totals: { calories: number; protein: number; carbs: number; fat: number; } }[] = [];
+    
+    // Start date and end date as Date objects for comparison
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    
+    // Loop through each date in the diary
+    Object.keys(diary).forEach(dateStr => {
+      const date = new Date(dateStr);
+      
+      // Check if the date is within the range
+      if (date >= start && date <= end) {
+        // Add the date with its totals
+        trends.push({
+          date: dateStr,
+          totals: diary[dateStr].totals
+        });
+      }
+    });
+    
+    return trends;
+  } catch (error) {
+    console.error('Error getting nutrition trends:', error);
     return [];
   }
 };

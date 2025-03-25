@@ -1,8 +1,31 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  ActivityIndicator,
+  Dimensions,
+  TouchableOpacity
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../../services/colors';
 import * as nutritionService from '../../services/nutritionService';
+import { format, subDays, isValid, parseISO } from 'date-fns';
+
+type TimeRange = '7days' | '14days' | '30days';
+type NutrientType = 'calories' | 'protein' | 'carbs' | 'fat';
+
+// Define structure for processed trend data
+interface DayTotals {
+  date: string;
+  totals: {
+    calories: number;
+    protein: number;
+    carbs: number;
+    fat: number;
+  };
+}
 
 // Mock data for visualization
 interface NutritionTrend {
@@ -13,295 +36,309 @@ interface NutritionTrend {
   fat: number;
 }
 
-export function NutritionTrendsScreen() {
-  const [trends, setTrends] = useState<NutritionTrend[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'week' | 'month'>('week');
-  const [selectedNutrient, setSelectedNutrient] = useState<'calories' | 'protein' | 'carbs' | 'fat'>('calories');
-
-  useEffect(() => {
-    loadTrends();
-  }, [activeTab]);
-
-  const loadTrends = async () => {
-    setLoading(true);
-    try {
-      // Get the end date (today)
-      const endDate = new Date();
-      
-      // Calculate the start date based on active tab
-      const startDate = new Date();
-      if (activeTab === 'week') {
-        startDate.setDate(endDate.getDate() - 7);
-      } else {
-        startDate.setDate(endDate.getDate() - 30);
-      }
-      
-      // Format dates for storage
-      const startFormatted = formatDateToYYYYMMDD(startDate);
-      const endFormatted = formatDateToYYYYMMDD(endDate);
-      
-      // Load diary entries for date range
-      const entries = await nutritionService.getDiaryEntriesForDateRange(startFormatted, endFormatted);
-      
-      // Process entries into daily summaries
-      const dailySummaries: Record<string, NutritionTrend> = {};
-      
-      // Create a record for each day in the range
-      let currentDate = new Date(startDate);
-      while (currentDate <= endDate) {
-        const dateString = formatDateToYYYYMMDD(currentDate);
-        dailySummaries[dateString] = {
-          date: dateString,
-          calories: 0,
-          protein: 0,
-          carbs: 0,
-          fat: 0
-        };
-        currentDate.setDate(currentDate.getDate() + 1);
-      }
-      
-      // Fill in actual data
-      for (const entry of entries) {
-        const date = entry.date;
-        if (dailySummaries[date]) {
-          dailySummaries[date].calories += entry.calories;
-          dailySummaries[date].protein += entry.protein;
-          dailySummaries[date].carbs += entry.carbs;
-          dailySummaries[date].fat += entry.fat;
-        }
-      }
-      
-      // Convert to array and sort by date
-      const trendsArray = Object.values(dailySummaries).sort((a, b) => 
-        a.date.localeCompare(b.date)
-      );
-      
-      setTrends(trendsArray);
-    } catch (error) {
-      console.error('Error loading nutrition trends:', error);
-    } finally {
-      setLoading(false);
-    }
+// Simple bar chart component
+const BarChart: React.FC<{
+  data: { date: string; value: number }[];
+  maxValue: number;
+  color: string;
+  label: string;
+}> = ({ data, maxValue, color, label }) => {
+  const formatDate = (dateString: string) => {
+    const date = parseISO(dateString);
+    return isValid(date) ? format(date, 'MM/dd') : '';
   };
 
-  const formatDateToYYYYMMDD = (date: Date): string => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
-
-  const formatDateDisplay = (dateString: string): string => {
-    const date = new Date(dateString);
-    const month = date.toLocaleString('default', { month: 'short' });
-    const day = date.getDate();
-    return `${month} ${day}`;
-  };
-
-  const getMaxValue = (): number => {
-    if (trends.length === 0) return 100;
-    
-    let max = 0;
-    trends.forEach(day => {
-      const value = day[selectedNutrient];
-      if (value > max) max = value;
-    });
-    
-    // Round up to the nearest 100 for calories, 10 for macros
-    if (selectedNutrient === 'calories') {
-      return Math.ceil(max / 100) * 100;
-    } else {
-      return Math.ceil(max / 10) * 10;
-    }
-  };
-
-  const calculateBarHeight = (value: number): number => {
-    const maxValue = getMaxValue();
-    // Max height for the bar in pixels
-    const MAX_HEIGHT = 150;
-    
-    return (value / maxValue) * MAX_HEIGHT;
-  };
-
-  const getNutrientColor = () => {
-    switch (selectedNutrient) {
-      case 'calories': return COLORS.primary;
-      case 'protein': return '#FF5252';
-      case 'carbs': return '#4CAF50';
-      case 'fat': return '#FFC107';
-      default: return COLORS.primary;
-    }
-  };
-
-  const renderTabs = () => (
-    <View style={styles.tabContainer}>
-      <TouchableOpacity
-        style={[styles.tab, activeTab === 'week' && styles.activeTab]}
-        onPress={() => setActiveTab('week')}
-      >
-        <Text style={[styles.tabText, activeTab === 'week' && styles.activeTabText]}>
-          Last 7 Days
-        </Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        style={[styles.tab, activeTab === 'month' && styles.activeTab]}
-        onPress={() => setActiveTab('month')}
-      >
-        <Text style={[styles.tabText, activeTab === 'month' && styles.activeTabText]}>
-          Last 30 Days
-        </Text>
-      </TouchableOpacity>
-    </View>
-  );
-
-  const renderNutrientTabs = () => (
-    <View style={styles.nutrientTabContainer}>
-      <TouchableOpacity
-        style={[styles.nutrientTab, selectedNutrient === 'calories' && styles.activeNutrientTab]}
-        onPress={() => setSelectedNutrient('calories')}
-      >
-        <Text style={styles.nutrientTabText}>Calories</Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        style={[styles.nutrientTab, selectedNutrient === 'protein' && styles.activeNutrientTab]}
-        onPress={() => setSelectedNutrient('protein')}
-      >
-        <Text style={styles.nutrientTabText}>Protein</Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        style={[styles.nutrientTab, selectedNutrient === 'carbs' && styles.activeNutrientTab]}
-        onPress={() => setSelectedNutrient('carbs')}
-      >
-        <Text style={styles.nutrientTabText}>Carbs</Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        style={[styles.nutrientTab, selectedNutrient === 'fat' && styles.activeNutrientTab]}
-        onPress={() => setSelectedNutrient('fat')}
-      >
-        <Text style={styles.nutrientTabText}>Fat</Text>
-      </TouchableOpacity>
-    </View>
-  );
-
-  const renderChart = () => {
-    if (loading) {
-      return (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={COLORS.primary} />
-        </View>
-      );
-    }
-
-    if (trends.length === 0) {
-      return (
-        <View style={styles.emptyContainer}>
-          <Ionicons name="nutrition-outline" size={50} color={COLORS.textSecondary} />
-          <Text style={styles.emptyText}>No nutrition data available</Text>
-        </View>
-      );
-    }
-
-    return (
-      <View style={styles.chartContainer}>
-        <View style={styles.yAxisLabels}>
-          <Text style={styles.yAxisLabel}>{getMaxValue()}</Text>
-          <Text style={styles.yAxisLabel}>{Math.floor(getMaxValue() / 2)}</Text>
-          <Text style={styles.yAxisLabel}>0</Text>
-        </View>
-        
-        <ScrollView 
-          horizontal 
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.chartContent}
-        >
-          <View style={styles.horizontalLine} />
-          <View style={[styles.horizontalLine, { bottom: 75 }]} />
-          <View style={[styles.horizontalLine, { bottom: 150 }]} />
-          
-          {trends.map((day, index) => (
-            <View key={day.date} style={styles.barContainer}>
-              <View style={styles.barValueContainer}>
-                <Text style={styles.barValue}>
-                  {Math.round(day[selectedNutrient])}
-                </Text>
-              </View>
-              <View 
-                style={[
-                  styles.bar, 
-                  { 
-                    height: calculateBarHeight(day[selectedNutrient]),
-                    backgroundColor: getNutrientColor() 
-                  }
-                ]} 
-              />
-              <Text style={styles.barLabel}>{formatDateDisplay(day.date)}</Text>
-            </View>
-          ))}
-        </ScrollView>
-      </View>
-    );
-  };
-
-  const renderSummary = () => {
-    if (loading || trends.length === 0) return null;
-
-    // Calculate averages
-    const sum = trends.reduce(
-      (acc, day) => ({
-        calories: acc.calories + day.calories,
-        protein: acc.protein + day.protein,
-        carbs: acc.carbs + day.carbs,
-        fat: acc.fat + day.fat
-      }),
-      { calories: 0, protein: 0, carbs: 0, fat: 0 }
-    );
-
-    const count = trends.length;
-    const averages = {
-      calories: Math.round(sum.calories / count),
-      protein: Math.round(sum.protein / count),
-      carbs: Math.round(sum.carbs / count),
-      fat: Math.round(sum.fat / count)
-    };
-
-    return (
-      <View style={styles.summaryContainer}>
-        <Text style={styles.summaryTitle}>Average Daily Nutrition</Text>
-        
-        <View style={styles.summaryRow}>
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryLabel}>Calories</Text>
-            <Text style={styles.summaryValue}>{averages.calories}</Text>
-          </View>
-          
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryLabel}>Protein</Text>
-            <Text style={styles.summaryValue}>{averages.protein}g</Text>
-          </View>
-        </View>
-        
-        <View style={styles.summaryRow}>
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryLabel}>Carbs</Text>
-            <Text style={styles.summaryValue}>{averages.carbs}g</Text>
-          </View>
-          
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryLabel}>Fat</Text>
-            <Text style={styles.summaryValue}>{averages.fat}g</Text>
-          </View>
-        </View>
-      </View>
-    );
-  };
+  if (maxValue === 0) maxValue = 1; // Prevent division by zero
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
-      {renderTabs()}
-      {renderNutrientTabs()}
-      {renderChart()}
-      {renderSummary()}
+    <View style={styles.chartContainer}>
+      <Text style={styles.chartLabel}>{label}</Text>
+      <View style={styles.chart}>
+        {data.map((item, index) => (
+          <View key={index} style={styles.barContainer}>
+            <View style={styles.barLabelContainer}>
+              <Text style={styles.barLabel}>{formatDate(item.date)}</Text>
+            </View>
+            <View style={[styles.bar, { backgroundColor: COLORS.primaryLight }]}>
+              <View
+                style={[
+                  styles.barFill,
+                  {
+                    backgroundColor: color,
+                    width: `${Math.min(100, (item.value / maxValue) * 100)}%`,
+                  },
+                ]}
+              />
+            </View>
+            <Text style={styles.barValue}>{Math.round(item.value)}</Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+};
+
+export function NutritionTrendsScreen() {
+  const [timeRange, setTimeRange] = useState<TimeRange>('7days');
+  const [nutrientType, setNutrientType] = useState<NutrientType>('calories');
+  const [trendData, setTrendData] = useState<{ date: string; value: number }[]>([]);
+  const [averages, setAverages] = useState({
+    calories: 0,
+    protein: 0,
+    carbs: 0,
+    fat: 0,
+  });
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    loadTrendData();
+  }, [timeRange, nutrientType]);
+
+  const loadTrendData = async () => {
+    setIsLoading(true);
+    try {
+      // Calculate date range
+      const endDate = new Date();
+      let startDate;
+      
+      if (timeRange === '7days') {
+        startDate = subDays(endDate, 6);
+      } else if (timeRange === '14days') {
+        startDate = subDays(endDate, 13);
+      } else {
+        startDate = subDays(endDate, 29);
+      }
+
+      // Format dates
+      const startDateStr = format(startDate, 'yyyy-MM-dd');
+      const endDateStr = format(endDate, 'yyyy-MM-dd');
+
+      // Get nutrition data for date range
+      const processedData = await nutritionService.getNutritionTrends(startDateStr, endDateStr);
+      
+      // Calculate daily values for selected nutrient
+      const dailyValues = processedData.map((day) => ({
+        date: day.date,
+        value: day.totals[nutrientType] || 0
+      }));
+
+      // Sort by date
+      dailyValues.sort((a, b) => a.date.localeCompare(b.date));
+      
+      // Calculate averages
+      const totalDays = dailyValues.length || 1; // Prevent division by zero
+      const totals = processedData.reduce(
+        (acc, day) => {
+          return {
+            calories: acc.calories + (day.totals.calories || 0),
+            protein: acc.protein + (day.totals.protein || 0),
+            carbs: acc.carbs + (day.totals.carbs || 0),
+            fat: acc.fat + (day.totals.fat || 0),
+          };
+        },
+        { calories: 0, protein: 0, carbs: 0, fat: 0 }
+      );
+
+      const averageValues = {
+        calories: totals.calories / totalDays,
+        protein: totals.protein / totalDays,
+        carbs: totals.carbs / totalDays,
+        fat: totals.fat / totalDays,
+      };
+
+      setTrendData(dailyValues);
+      setAverages(averageValues);
+    } catch (error) {
+      console.error('Error loading trend data:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const getColor = (type: NutrientType): string => {
+    switch (type) {
+      case 'calories':
+        return COLORS.primary;
+      case 'protein':
+        return '#4CAF50'; // Green
+      case 'carbs':
+        return '#FF9800'; // Orange
+      case 'fat':
+        return '#9C27B0'; // Purple
+      default:
+        return COLORS.primary;
+    }
+  };
+
+  const getLabel = (type: NutrientType): string => {
+    switch (type) {
+      case 'calories':
+        return 'Calories (kcal)';
+      case 'protein':
+        return 'Protein (g)';
+      case 'carbs':
+        return 'Carbs (g)';
+      case 'fat':
+        return 'Fat (g)';
+      default:
+        return '';
+    }
+  };
+
+  // Find max value for chart scaling
+  const maxValue = trendData.length > 0
+    ? Math.max(...trendData.map(item => item.value)) * 1.1 // Add 10% padding
+    : 100;
+
+  return (
+    <ScrollView style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.title}>Nutrition Trends</Text>
+      </View>
+
+      <View style={styles.filterContainer}>
+        <View style={styles.timeRangeFilter}>
+          <Text style={styles.filterLabel}>Time Range:</Text>
+          <View style={styles.buttonGroup}>
+            <TouchableOpacity
+              style={[
+                styles.filterButton,
+                timeRange === '7days' && styles.activeFilterButton,
+              ]}
+              onPress={() => setTimeRange('7days')}
+            >
+              <Text style={timeRange === '7days' ? styles.activeFilterText : styles.filterText}>
+                7 Days
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.filterButton,
+                timeRange === '14days' && styles.activeFilterButton,
+              ]}
+              onPress={() => setTimeRange('14days')}
+            >
+              <Text style={timeRange === '14days' ? styles.activeFilterText : styles.filterText}>
+                14 Days
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.filterButton,
+                timeRange === '30days' && styles.activeFilterButton,
+              ]}
+              onPress={() => setTimeRange('30days')}
+            >
+              <Text style={timeRange === '30days' ? styles.activeFilterText : styles.filterText}>
+                30 Days
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <View style={styles.nutrientFilter}>
+          <Text style={styles.filterLabel}>Nutrient:</Text>
+          <View style={styles.buttonGroup}>
+            <TouchableOpacity
+              style={[
+                styles.filterButton,
+                nutrientType === 'calories' && styles.activeFilterButton,
+              ]}
+              onPress={() => setNutrientType('calories')}
+            >
+              <Text style={nutrientType === 'calories' ? styles.activeFilterText : styles.filterText}>
+                Calories
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.filterButton,
+                nutrientType === 'protein' && styles.activeFilterButton,
+                nutrientType === 'protein' && { backgroundColor: '#4CAF50' },
+              ]}
+              onPress={() => setNutrientType('protein')}
+            >
+              <Text style={nutrientType === 'protein' ? styles.activeFilterText : styles.filterText}>
+                Protein
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.filterButton,
+                nutrientType === 'carbs' && styles.activeFilterButton,
+                nutrientType === 'carbs' && { backgroundColor: '#FF9800' },
+              ]}
+              onPress={() => setNutrientType('carbs')}
+            >
+              <Text style={nutrientType === 'carbs' ? styles.activeFilterText : styles.filterText}>
+                Carbs
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.filterButton,
+                nutrientType === 'fat' && styles.activeFilterButton,
+                nutrientType === 'fat' && { backgroundColor: '#9C27B0' },
+              ]}
+              onPress={() => setNutrientType('fat')}
+            >
+              <Text style={nutrientType === 'fat' ? styles.activeFilterText : styles.filterText}>
+                Fat
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+
+      {isLoading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={COLORS.primary} />
+          <Text>Loading nutrition data...</Text>
+        </View>
+      ) : (
+        <View style={styles.content}>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryTitle}>Average Daily Intake</Text>
+            <View style={styles.averagesContainer}>
+              <View style={styles.averageItem}>
+                <Text style={styles.averageLabel}>Calories</Text>
+                <Text style={styles.averageValue}>{Math.round(averages.calories)} kcal</Text>
+              </View>
+              <View style={styles.averageItem}>
+                <Text style={styles.averageLabel}>Protein</Text>
+                <Text style={[styles.averageValue, { color: '#4CAF50' }]}>
+                  {Math.round(averages.protein)}g
+                </Text>
+              </View>
+              <View style={styles.averageItem}>
+                <Text style={styles.averageLabel}>Carbs</Text>
+                <Text style={[styles.averageValue, { color: '#FF9800' }]}>
+                  {Math.round(averages.carbs)}g
+                </Text>
+              </View>
+              <View style={styles.averageItem}>
+                <Text style={styles.averageLabel}>Fat</Text>
+                <Text style={[styles.averageValue, { color: '#9C27B0' }]}>
+                  {Math.round(averages.fat)}g
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          {trendData.length > 0 ? (
+            <BarChart
+              data={trendData}
+              maxValue={maxValue}
+              color={getColor(nutrientType)}
+              label={getLabel(nutrientType)}
+            />
+          ) : (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>No nutrition data for this period</Text>
+            </View>
+          )}
+        </View>
+      )}
     </ScrollView>
   );
 }
@@ -311,156 +348,147 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.background,
   },
-  contentContainer: {
-    padding: 16,
+  header: {
+    padding: 15,
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: COLORS.text,
   },
   loadingContainer: {
-    height: 200,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  emptyContainer: {
-    height: 200,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  emptyText: {
-    fontSize: 16,
-    color: COLORS.textSecondary,
-    marginTop: 10,
-  },
-  tabContainer: {
-    flexDirection: 'row',
-    marginBottom: 15,
-    backgroundColor: '#f5f5f5',
-    borderRadius: 10,
-    overflow: 'hidden',
-  },
-  tab: {
     flex: 1,
-    paddingVertical: 12,
+    justifyContent: 'center',
     alignItems: 'center',
+    padding: 20,
   },
-  activeTab: {
+  content: {
+    padding: 10,
+  },
+  filterContainer: {
+    padding: 10,
+    backgroundColor: COLORS.card,
+    borderRadius: 10,
+    margin: 10,
+    marginTop: 5,
+  },
+  filterLabel: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    marginBottom: 5,
+  },
+  timeRangeFilter: {
+    marginBottom: 10,
+  },
+  nutrientFilter: {
+    marginBottom: 5,
+  },
+  buttonGroup: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  filterButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginRight: 8,
+    marginBottom: 8,
+    borderRadius: 20,
+    backgroundColor: COLORS.primaryLight,
+  },
+  activeFilterButton: {
     backgroundColor: COLORS.primary,
   },
-  tabText: {
-    fontSize: 14,
-    fontWeight: '600',
+  filterText: {
+    color: COLORS.text,
+    fontSize: 12,
+  },
+  activeFilterText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  summaryCard: {
+    backgroundColor: COLORS.card,
+    borderRadius: 10,
+    padding: 15,
+    marginBottom: 15,
+  },
+  summaryTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 10,
+    color: COLORS.text,
+  },
+  averagesContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+  },
+  averageItem: {
+    width: '48%',
+    marginBottom: 10,
+  },
+  averageLabel: {
+    fontSize: 12,
     color: COLORS.textSecondary,
   },
-  activeTabText: {
-    color: 'white',
-  },
-  nutrientTabContainer: {
-    flexDirection: 'row',
-    marginBottom: 20,
-  },
-  nutrientTab: {
-    flex: 1,
-    paddingVertical: 8,
-    alignItems: 'center',
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
-  },
-  activeNutrientTab: {
-    borderBottomColor: COLORS.primary,
-  },
-  nutrientTabText: {
-    fontSize: 14,
-    fontWeight: '600',
+  averageValue: {
+    fontSize: 18,
+    fontWeight: 'bold',
     color: COLORS.text,
   },
   chartContainer: {
-    flexDirection: 'row',
-    height: 220,
-    marginBottom: 20,
-  },
-  chartContent: {
-    alignItems: 'flex-end',
-    paddingBottom: 30,
-    paddingLeft: 10,
-    paddingRight: 10,
-  },
-  yAxisLabels: {
-    width: 40,
-    height: 150,
-    justifyContent: 'space-between',
-    marginRight: 10,
-  },
-  yAxisLabel: {
-    textAlign: 'right',
-    fontSize: 12,
-    color: COLORS.textSecondary,
-  },
-  horizontalLine: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    height: 1,
-    backgroundColor: '#E0E0E0',
-    bottom: 0,
-  },
-  barContainer: {
-    alignItems: 'center',
-    marginHorizontal: 8,
-    width: 40,
-  },
-  barValueContainer: {
-    height: 20,
-  },
-  barValue: {
-    fontSize: 12,
-    color: COLORS.text,
-  },
-  bar: {
-    width: 20,
-    borderRadius: 3,
-    marginBottom: 5,
-  },
-  barLabel: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-    marginTop: 5,
-  },
-  summaryContainer: {
     backgroundColor: COLORS.card,
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 20,
-    shadowColor: COLORS.shadow,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+    borderRadius: 10,
+    padding: 15,
+    marginBottom: 15,
   },
-  summaryTitle: {
-    fontSize: 18,
+  chartLabel: {
+    fontSize: 16,
     fontWeight: 'bold',
     marginBottom: 15,
     color: COLORS.text,
   },
-  summaryRow: {
+  chart: {
+    marginTop: 10,
+  },
+  barContainer: {
     flexDirection: 'row',
+    alignItems: 'center',
     marginBottom: 10,
   },
-  summaryItem: {
+  barLabelContainer: {
+    width: 40,
+  },
+  barLabel: {
+    fontSize: 10,
+    color: COLORS.textSecondary,
+  },
+  bar: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
-    borderRadius: 8,
-    padding: 12,
-    marginHorizontal: 5,
+    height: 20,
+    borderRadius: 10,
+    marginHorizontal: 10,
+  },
+  barFill: {
+    height: '100%',
+    borderRadius: 10,
+  },
+  barValue: {
+    width: 40,
+    fontSize: 12,
+    textAlign: 'right',
+    color: COLORS.text,
+  },
+  emptyContainer: {
+    padding: 20,
+    backgroundColor: COLORS.card,
+    borderRadius: 10,
     alignItems: 'center',
   },
-  summaryLabel: {
-    fontSize: 14,
+  emptyText: {
     color: COLORS.textSecondary,
-    marginBottom: 5,
-  },
-  summaryValue: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: COLORS.text,
+    fontStyle: 'italic',
   },
 });
 

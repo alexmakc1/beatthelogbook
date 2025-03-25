@@ -1022,11 +1022,14 @@ const styles = StyleSheet.create({
     padding: 12,
     flexDirection: 'row',
     alignItems: 'center',
-    shadowColor: COLORS.shadow,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+    ...Platform.select({
+      ios: {
+        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+      },
+      android: {
+        elevation: 2,
+      },
+    }),
   },
   searchIcon: {
     marginRight: 12,
@@ -1048,11 +1051,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderLeftWidth: 4,
     borderLeftColor: COLORS.primary,
-    shadowColor: COLORS.shadow,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+    ...Platform.select({
+      ios: {
+        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+      },
+      android: {
+        elevation: 2,
+      },
+    }),
   },
   exerciseIconContainer: {
     marginRight: 12,
@@ -1109,14 +1115,7 @@ const styles = StyleSheet.create({
     width: '100%',
     maxHeight: '90%',
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 8,
+    boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -1527,5 +1526,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.textSecondary,
     textAlign: 'center',
+  },
+  card: {
+    backgroundColor: COLORS.card,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
   },
 }); 

@@ -498,6 +498,18 @@ export default function HomeScreen() {
               <Text style={styles.buttonText}>Nutrition Tracker</Text>
             </View>
           </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={[styles.button, { backgroundColor: '#7B1FA2' }]} // Purple for nicotine
+            onPress={() => {
+              router.push('/(tabs)/nicotine');
+            }}
+          >
+            <View style={styles.buttonContent}>
+              <Ionicons name="medkit-outline" size={22} color={COLORS.card} style={styles.buttonIcon} />
+              <Text style={styles.buttonText}>Nicotine Tracker</Text>
+            </View>
+          </TouchableOpacity>
         </View>
       </View>
 

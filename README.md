@@ -1,50 +1,75 @@
-# Welcome to your Expo app 👋
+# Beat The Logbook - Workout and Nutrition Tracker
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+A comprehensive workout and nutrition tracking app built with React Native and Expo.
 
-## Get started
+## Features
 
-1. Install dependencies
+- Track your workouts and progress
+- Log your food intake with nutritional information
+- View trends and analytics for your fitness journey
+- Set goals and monitor your achievements
 
-   ```bash
+## Getting Started
+
+### Prerequisites
+
+- Node.js (v14 or later)
+- npm or yarn
+- Expo CLI
+
+### Installation
+
+1. Clone the repository
+   ```
+   git clone <repository-url>
+   ```
+
+2. Install dependencies
+   ```
+   cd workout-tracker
    npm install
    ```
 
-2. Start the app
+3. Set up API credentials
+   - The nutrition tracker uses the FatSecret API for food data
+   - Register for an account at [FatSecret Platform](https://platform.fatsecret.com/)
+   - Create an application to get your Client ID and Client Secret
+   - Update the credentials in `services/nutritionService.ts`
 
-   ```bash
-    npx expo start
+4. Start the development server
+   ```
+   npx expo start
    ```
 
-In the output, you'll find options to open the app in a
+## Usage
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+- **Workout Tracker**: Log your exercises, sets, reps, and weights
+- **Nutrition Tracker**: Search for foods and log your meals
+- **Progress Tracking**: Monitor your progress over time with charts and statistics
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+## Development
 
-## Get a fresh project
+### Project Structure
 
-When you're ready, run:
+- `/app`: Main screens and navigation
+- `/components`: Reusable UI components
+- `/services`: API and business logic services
+- `/assets`: Images, fonts, and other static assets
 
-```bash
-npm run reset-project
-```
+### Contributing
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
-## Learn more
+## License
 
-To learn more about developing your project with Expo, look at the following resources:
+This project is licensed under the MIT License - see the LICENSE file for details.
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+## Acknowledgments
 
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+- FatSecret Platform API for nutrition data
+- Expo for the development framework
+- React Native for the mobile app foundation

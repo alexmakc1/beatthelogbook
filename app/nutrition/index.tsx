@@ -6,13 +6,15 @@ import * as nutritionService from '../../services/nutritionService';
 import { FoodDiaryScreen } from './diary';
 import { FoodSearchScreen } from './search';
 import { NutritionTrendsScreen } from './trends';
+import { NutritionItem } from '../../services/nutritionService';
 
 type ActiveTab = 'diary' | 'search' | 'trends';
+type MealType = 'breakfast' | 'lunch' | 'dinner' | 'snack';
 
 export function NutritionScreen() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('diary');
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
-  const [diaryData, setDiaryData] = useState<any>(null);
+  const [diaryData, setDiaryData] = useState<nutritionService.DailyDiary | null>(null);
 
   useEffect(() => {
     loadDiaryData();
@@ -52,7 +54,7 @@ export function NutritionScreen() {
     setActiveTab(tab);
   };
 
-  const handleAddFood = (food: any, meal: any) => {
+  const handleAddFood = (food: nutritionService.NutritionItem, meal: MealType) => {
     // This function will be passed to the search component
     // to allow adding food directly to the diary
     setActiveTab('diary');
@@ -78,7 +80,7 @@ export function NutritionScreen() {
       case 'search':
         return (
           <FoodSearchScreen 
-            onAddFoodToDiary={(food, meal, quantity) => {
+            onAddFoodToDiary={(food: NutritionItem, meal: MealType, quantity: number) => {
               // Add food to diary and switch back to diary tab
               const dateString = nutritionService.formatDateToYYYYMMDD(currentDate);
               nutritionService.addToDiary(dateString, meal, food, quantity)
@@ -106,13 +108,14 @@ export function NutritionScreen() {
         
         {activeTab === 'diary' && (
           <View style={styles.dateSelector}>
-            <TouchableOpacity onPress={() => changeDate('prev')}>
+            <TouchableOpacity style={styles.dateArrow} onPress={() => changeDate('prev')}>
               <Ionicons name="chevron-back" size={24} color={COLORS.primary} />
             </TouchableOpacity>
             
             <Text style={styles.dateText}>{formatDate(currentDate)}</Text>
             
             <TouchableOpacity 
+              style={styles.dateArrow}
               onPress={() => changeDate('next')}
               disabled={new Date().setHours(0, 0, 0, 0) === currentDate.setHours(0, 0, 0, 0)}
             >
@@ -137,51 +140,60 @@ export function NutritionScreen() {
           style={getTabStyle('diary')}
           onPress={() => handleTabChange('diary')}
         >
-          <Ionicons 
-            name={activeTab === 'diary' ? 'book' : 'book-outline'} 
-            size={24} 
-            color={activeTab === 'diary' ? COLORS.primary : COLORS.textSecondary} 
-          />
-          <Text style={[
-            styles.tabText,
-            activeTab === 'diary' && styles.activeTabText
-          ]}>
-            Diary
-          </Text>
+          <View style={styles.tabContent}>
+            <Ionicons 
+              name={activeTab === 'diary' ? 'book' : 'book-outline'} 
+              size={24} 
+              color={activeTab === 'diary' ? COLORS.primary : COLORS.textSecondary} 
+            />
+            <Text style={[
+              styles.tabText,
+              activeTab === 'diary' && styles.activeTabText
+            ]}>
+              Diary
+            </Text>
+          </View>
+          {activeTab === 'diary' && <View style={styles.activeIndicator} />}
         </TouchableOpacity>
         
         <TouchableOpacity 
           style={getTabStyle('search')}
           onPress={() => handleTabChange('search')}
         >
-          <Ionicons 
-            name={activeTab === 'search' ? 'search' : 'search-outline'} 
-            size={24} 
-            color={activeTab === 'search' ? COLORS.primary : COLORS.textSecondary} 
-          />
-          <Text style={[
-            styles.tabText,
-            activeTab === 'search' && styles.activeTabText
-          ]}>
-            Search
-          </Text>
+          <View style={styles.tabContent}>
+            <Ionicons 
+              name={activeTab === 'search' ? 'search' : 'search-outline'} 
+              size={24} 
+              color={activeTab === 'search' ? COLORS.primary : COLORS.textSecondary} 
+            />
+            <Text style={[
+              styles.tabText,
+              activeTab === 'search' && styles.activeTabText
+            ]}>
+              Search
+            </Text>
+          </View>
+          {activeTab === 'search' && <View style={styles.activeIndicator} />}
         </TouchableOpacity>
         
         <TouchableOpacity 
           style={getTabStyle('trends')}
           onPress={() => handleTabChange('trends')}
         >
-          <Ionicons 
-            name={activeTab === 'trends' ? 'trending-up' : 'trending-up-outline'} 
-            size={24} 
-            color={activeTab === 'trends' ? COLORS.primary : COLORS.textSecondary} 
-          />
-          <Text style={[
-            styles.tabText,
-            activeTab === 'trends' && styles.activeTabText
-          ]}>
-            Trends
-          </Text>
+          <View style={styles.tabContent}>
+            <Ionicons 
+              name={activeTab === 'trends' ? 'trending-up' : 'trending-up-outline'} 
+              size={24} 
+              color={activeTab === 'trends' ? COLORS.primary : COLORS.textSecondary} 
+            />
+            <Text style={[
+              styles.tabText,
+              activeTab === 'trends' && styles.activeTabText
+            ]}>
+              Trends
+            </Text>
+          </View>
+          {activeTab === 'trends' && <View style={styles.activeIndicator} />}
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -195,26 +207,37 @@ const styles = StyleSheet.create({
   },
   header: {
     padding: 16,
-    paddingBottom: 8,
+    paddingBottom: 12,
     backgroundColor: COLORS.card,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   title: {
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: 'bold',
-    color: COLORS.text,
+    color: COLORS.primary,
     textAlign: 'center',
   },
   dateSelector: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 8,
+    marginTop: 10,
+    paddingHorizontal: 10,
+  },
+  dateArrow: {
+    padding: 5,
+    borderRadius: 20,
   },
   dateText: {
     fontSize: 16,
     color: COLORS.text,
+    fontWeight: '500',
   },
   content: {
     flex: 1,
@@ -224,15 +247,33 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: COLORS.border,
     backgroundColor: COLORS.card,
+    height: 60,
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 8,
   },
   tabItem: {
     flex: 1,
-    paddingVertical: 10,
+    paddingVertical: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  tabContent: {
     alignItems: 'center',
   },
   activeTabItem: {
-    borderTopWidth: 2,
-    borderTopColor: COLORS.primary,
+    backgroundColor: COLORS.card,
+  },
+  activeIndicator: {
+    position: 'absolute',
+    bottom: 0,
+    width: '50%',
+    height: 3,
+    backgroundColor: COLORS.primary,
+    borderRadius: 1.5,
   },
   tabText: {
     fontSize: 12,
