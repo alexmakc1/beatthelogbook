@@ -109,7 +109,14 @@ export const setSuggestedReps = async (reps: number): Promise<void> => {
 export const getWeightUnit = async (): Promise<WeightUnit> => {
   try {
     const value = await AsyncStorage.getItem(WEIGHT_UNIT_KEY);
-    return (value as WeightUnit) || DEFAULT_WEIGHT_UNIT;
+    // Normalize to lowercase to ensure consistency
+    if (value) {
+      const normalizedValue = value.toLowerCase();
+      return (normalizedValue === 'kg' || normalizedValue === 'lbs') 
+        ? normalizedValue as WeightUnit 
+        : DEFAULT_WEIGHT_UNIT;
+    }
+    return DEFAULT_WEIGHT_UNIT;
   } catch (error) {
     console.error('Error getting weight unit:', error);
     return DEFAULT_WEIGHT_UNIT;
@@ -157,11 +164,15 @@ export const convertWeight = (
   fromUnit: WeightUnit, 
   toUnit: WeightUnit
 ): number => {
-  if (fromUnit === toUnit) {
+  // Normalize units to lowercase
+  const fromNormalized = fromUnit.toLowerCase() as WeightUnit;
+  const toNormalized = toUnit.toLowerCase() as WeightUnit;
+  
+  if (fromNormalized === toNormalized) {
     return weight;
   }
   
-  if (fromUnit === 'kg' && toUnit === 'lbs') {
+  if (fromNormalized === 'kg' && toNormalized === 'lbs') {
     return weight * 2.20462;
   } else {
     return weight / 2.20462;

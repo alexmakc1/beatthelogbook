@@ -13,6 +13,8 @@ import {
 import { useRouter } from 'expo-router';
 import * as storageService from '../../services/storageService';
 import { Swipeable } from 'react-native-gesture-handler';
+import { COLORS } from '../../services/colors';
+import { Ionicons } from '@expo/vector-icons';
 
 interface Template {
   id: string;
@@ -120,18 +122,29 @@ export default function TemplatesScreen() {
     );
   };
 
+  // Function to handle going back
+  const handleBack = () => {
+    router.back();
+  };
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#4CAF50" />
-        <Text>Loading templates...</Text>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+        <Text style={{ color: COLORS.textSecondary }}>Loading templates...</Text>
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Workout Templates</Text>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={handleBack} style={styles.backButton}>
+          <Ionicons name="arrow-back" size={24} color={COLORS.primary} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Workout Templates</Text>
+        <View style={styles.headerRight} />
+      </View>
       
       {templates.length === 0 ? (
         <View style={styles.emptyContainer}>
@@ -205,10 +218,10 @@ export default function TemplatesScreen() {
       </Modal>
       
       <TouchableOpacity 
-        style={styles.startButton}
+        style={styles.addButton}
         onPress={() => router.push('/')}
       >
-        <Text style={styles.buttonText}>Back to Home</Text>
+        <Text style={styles.addButtonText}>Back to Home</Text>
       </TouchableOpacity>
     </View>
   );
@@ -217,29 +230,46 @@ export default function TemplatesScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 20,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: COLORS.background,
+    padding: 15,
   },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
+  header: {
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 8,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
   },
-  title: {
-    fontSize: 24,
+  backButton: {
+    padding: 8,
+  },
+  headerTitle: {
+    fontSize: 18,
     fontWeight: 'bold',
-    marginBottom: 20,
+    flex: 1,
     textAlign: 'center',
+  },
+  headerRight: {
+    width: 40,
+  },
+  listContainer: {
+    flex: 1,
   },
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 20,
   },
   emptyText: {
-    fontSize: 18,
-    color: '#888',
-    marginBottom: 10,
+    fontSize: 16,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    marginBottom: 15,
   },
   emptySubText: {
     fontSize: 14,
@@ -247,27 +277,27 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   templateCard: {
-    backgroundColor: 'white',
-    borderRadius: 10,
+    backgroundColor: COLORS.card,
     padding: 15,
-    marginBottom: 15,
-    borderWidth: 1,
-    borderColor: '#eee',
-    shadowColor: '#000',
+    borderRadius: 10,
+    marginBottom: 10,
+    shadowColor: COLORS.shadow,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 3,
+    shadowRadius: 2,
     elevation: 2,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
   templateName: {
     fontSize: 18,
     fontWeight: 'bold',
     marginBottom: 5,
+    color: COLORS.text,
   },
   exerciseCount: {
     fontSize: 14,
-    color: '#666',
-    marginBottom: 10,
+    color: COLORS.textSecondary,
   },
   exerciseList: {
     marginTop: 5,
@@ -281,19 +311,21 @@ const styles = StyleSheet.create({
     color: '#888',
     fontStyle: 'italic',
   },
-  startButton: {
-    backgroundColor: '#4CAF50',
+  addButton: {
+    backgroundColor: COLORS.primary,
     padding: 15,
-    borderRadius: 5,
+    borderRadius: 10,
     alignItems: 'center',
+    justifyContent: 'center',
     marginTop: 10,
   },
-  buttonText: {
-    color: 'white',
+  addButtonText: {
+    color: COLORS.card,
     fontWeight: 'bold',
+    fontSize: 16,
   },
   deleteAction: {
-    backgroundColor: '#FF3B30',
+    backgroundColor: COLORS.accent,
     justifyContent: 'center',
     alignItems: 'center',
     width: 80,
@@ -303,7 +335,7 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 10,
   },
   deleteActionText: {
-    color: 'white',
+    color: COLORS.card,
     fontWeight: 'bold',
     fontSize: 16,
   },
@@ -314,12 +346,12 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
   modalContent: {
-    backgroundColor: 'white',
+    backgroundColor: COLORS.card,
     borderRadius: 10,
     padding: 20,
     width: '80%',
     alignItems: 'center',
-    shadowColor: '#000',
+    shadowColor: COLORS.shadow,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
@@ -329,14 +361,16 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     marginBottom: 15,
+    color: COLORS.text,
   },
   modalInput: {
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: COLORS.border,
     borderRadius: 5,
     padding: 10,
     width: '100%',
     marginBottom: 20,
+    color: COLORS.text,
   },
   modalButtons: {
     flexDirection: 'row',
@@ -350,19 +384,24 @@ const styles = StyleSheet.create({
     width: '48%',
   },
   cancelModalButton: {
-    backgroundColor: '#f5f5f5',
+    backgroundColor: COLORS.background,
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: COLORS.border,
   },
   startModalButton: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: COLORS.success,
   },
   cancelModalButtonText: {
-    color: '#666',
+    color: COLORS.textSecondary,
     fontWeight: 'bold',
   },
   startModalButtonText: {
-    color: 'white',
+    color: COLORS.card,
     fontWeight: 'bold',
-  }
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
 }); 

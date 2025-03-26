@@ -8,11 +8,14 @@ import {
   TouchableOpacity,
   Alert,
   Modal,
-  TextInput
+  TextInput,
+  Platform
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as storageService from '../../../services/storageService';
 import * as settingsService from '../../../services/settingsService';
+import { COLORS } from '../../../services/colors';
+import { Ionicons } from '@expo/vector-icons';
 
 type Workout = storageService.Workout;
 
@@ -28,6 +31,11 @@ export default function WorkoutDetailsScreen() {
   const [startTimeInput, setStartTimeInput] = useState('');
   const [durationInput, setDurationInput] = useState('');
   const [weightUnit, setWeightUnit] = useState<settingsService.WeightUnit>(settingsService.DEFAULT_WEIGHT_UNIT);
+
+  // Function to handle going back
+  const handleBack = () => {
+    router.back();
+  };
 
   useEffect(() => {
     loadSettings();
@@ -99,9 +107,8 @@ export default function WorkoutDetailsScreen() {
 
   const handleEditWorkout = () => {
     if (workout && typeof id === 'string') {
-      // @ts-ignore - Suppressing type error for navigation path
       router.push({
-        pathname: "/edit-workout/[id]/index",
+        pathname: "/edit-workout/[id]",
         params: { id }
       });
     }
@@ -218,7 +225,7 @@ export default function WorkoutDetailsScreen() {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#4CAF50" />
+        <ActivityIndicator size="large" color={COLORS.primary} />
         <Text>Loading workout details...</Text>
       </View>
     );
@@ -234,9 +241,29 @@ export default function WorkoutDetailsScreen() {
 
   return (
     <View style={styles.container}>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={handleBack} style={styles.backButton}>
+          <Ionicons name="arrow-back" size={24} color={COLORS.primary} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Workout Details</Text>
+        <View style={styles.headerRight}>
+          {workout && (
+            <TouchableOpacity onPress={() => setShowTemplateModal(true)}>
+              <Ionicons name="save-outline" size={24} color={COLORS.primary} />
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+      
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        <Text style={styles.title}>Workout Details</Text>
-        <Text style={styles.dateText}>{formatDate(workout.date)}</Text>
+        <View style={styles.workoutDate}>
+          <Text style={styles.dateText}>
+            {workout?.date ? formatDate(workout.date) : 'No date available'}
+          </Text>
+          <TouchableOpacity style={styles.editTimeButton} onPress={() => setShowTimeModal(true)}>
+            <Text style={styles.editTimeButtonText}>Edit Time</Text>
+          </TouchableOpacity>
+        </View>
         
         <View style={styles.summaryContainer}>
           <Text style={styles.summaryText}>
@@ -413,7 +440,32 @@ export default function WorkoutDetailsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: COLORS.background,
+    paddingBottom: 80, // Space for the button container
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'ios' ? 50 : 16,
+    paddingBottom: 8,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  backButton: {
+    padding: 8,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    flex: 1,
+    textAlign: 'center',
+  },
+  headerRight: {
+    width: 40,
+    alignItems: 'flex-end',
   },
   scrollContent: {
     padding: 20,
@@ -433,15 +485,15 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: 'red',
   },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 5,
-    textAlign: 'center',
+  workoutDate: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 20,
   },
   dateText: {
     fontSize: 16,
-    color: '#666',
+    color: COLORS.textSecondary,
     marginBottom: 20,
     textAlign: 'center',
   },
@@ -456,13 +508,13 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   exerciseCard: {
-    backgroundColor: 'white',
+    backgroundColor: COLORS.card,
     borderRadius: 10,
     padding: 15,
     marginBottom: 15,
     borderWidth: 1,
-    borderColor: '#eee',
-    shadowColor: '#000',
+    borderColor: COLORS.border,
+    shadowColor: COLORS.shadow,
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
     shadowRadius: 2,
@@ -473,10 +525,14 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 15,
+    flexWrap: 'wrap',
   },
   exerciseName: {
     fontSize: 18,
     fontWeight: 'bold',
+    color: COLORS.text,
+    flex: 1,
+    marginRight: 10,
   },
   setsContainer: {
     marginTop: 5,
@@ -484,7 +540,7 @@ const styles = StyleSheet.create({
   setsHeader: {
     flexDirection: 'row',
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    borderBottomColor: COLORS.border,
     paddingBottom: 8,
     marginBottom: 8,
   },
@@ -492,16 +548,18 @@ const styles = StyleSheet.create({
     flex: 1,
     fontWeight: 'bold',
     textAlign: 'center',
+    color: COLORS.text,
   },
   setRow: {
     flexDirection: 'row',
     paddingVertical: 5,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    borderBottomColor: COLORS.border,
   },
   setText: {
     flex: 1,
     textAlign: 'center',
+    color: COLORS.text,
   },
   buttonContainer: {
     position: 'absolute',
@@ -509,14 +567,14 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     padding: 15,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: COLORS.background,
     borderTopWidth: 1,
-    borderTopColor: '#ddd',
+    borderTopColor: COLORS.border,
     flexDirection: 'row',
     justifyContent: 'space-between',
   },
   editButton: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: COLORS.primary,
     padding: 15,
     borderRadius: 5,
     alignItems: 'center',
@@ -524,14 +582,14 @@ const styles = StyleSheet.create({
     marginLeft: 10,
   },
   saveTemplateButton: {
-    backgroundColor: '#FF9800',
+    backgroundColor: COLORS.secondary,
     padding: 15,
     borderRadius: 5,
     alignItems: 'center',
     flex: 1,
   },
   buttonText: {
-    color: 'white',
+    color: COLORS.card,
     fontWeight: 'bold',
     fontSize: 16,
   },
@@ -542,12 +600,12 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
   modalContent: {
-    backgroundColor: 'white',
+    backgroundColor: COLORS.card,
     borderRadius: 10,
     padding: 20,
     width: '80%',
     alignItems: 'center',
-    shadowColor: '#000',
+    shadowColor: COLORS.shadow,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
@@ -557,20 +615,23 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     marginBottom: 5,
+    color: COLORS.text,
   },
   modalSubtitle: {
     fontSize: 14,
-    color: '#666',
+    color: COLORS.textSecondary,
     marginBottom: 15,
     textAlign: 'center',
   },
   modalInput: {
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: COLORS.border,
     borderRadius: 5,
     padding: 10,
     width: '100%',
     marginBottom: 20,
+    backgroundColor: COLORS.card,
+    color: COLORS.text,
   },
   modalButtons: {
     flexDirection: 'row',
@@ -578,37 +639,37 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   cancelModalButton: {
-    backgroundColor: '#f5f5f5',
+    backgroundColor: COLORS.background,
     padding: 10,
     borderRadius: 5,
     alignItems: 'center',
     width: '48%',
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: COLORS.border,
   },
   saveModalButton: {
-    backgroundColor: '#FF9800',
+    backgroundColor: COLORS.secondary,
     padding: 10,
     borderRadius: 5,
     alignItems: 'center',
     width: '48%',
   },
   cancelModalButtonText: {
-    color: '#666',
+    color: COLORS.textSecondary,
     fontWeight: 'bold',
   },
   saveModalButtonText: {
-    color: 'white',
+    color: COLORS.card,
     fontWeight: 'bold',
   },
   timeContainer: {
-    backgroundColor: 'white',
+    backgroundColor: COLORS.card,
     borderRadius: 10,
     padding: 15,
     marginBottom: 15,
     borderWidth: 1,
-    borderColor: '#eee',
-    shadowColor: '#000',
+    borderColor: COLORS.border,
+    shadowColor: COLORS.shadow,
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
     shadowRadius: 2,
@@ -623,19 +684,21 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginRight: 10,
     width: 100,
+    color: COLORS.text,
   },
   timeValue: {
     flex: 1,
+    color: COLORS.text,
   },
   editTimeButton: {
-    backgroundColor: '#2196F3',
+    backgroundColor: COLORS.primary,
     padding: 10,
     borderRadius: 5,
     alignItems: 'center',
     marginTop: 10,
   },
   editTimeButtonText: {
-    color: 'white',
+    color: COLORS.card,
     fontWeight: 'bold',
   },
   inputLabel: {
@@ -643,10 +706,12 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     marginBottom: 5,
     marginTop: 10,
+    color: COLORS.text,
   },
   viewHistoryText: {
     fontSize: 14,
-    color: '#4CAF50',
+    color: COLORS.primary,
     fontWeight: '500',
+    paddingVertical: 5,
   },
 }); 

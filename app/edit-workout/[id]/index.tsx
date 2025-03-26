@@ -13,6 +13,8 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as storageService from '../../../services/storageService';
+import { COLORS } from '../../../services/colors';
+import { Ionicons } from '@expo/vector-icons';
 
 type Exercise = storageService.Exercise;
 type Set = storageService.Set;
@@ -148,11 +150,16 @@ export default function EditWorkoutScreen() {
     }
   };
 
+  // Function to handle going back
+  const handleBack = () => {
+    router.back();
+  };
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#4CAF50" />
-        <Text>Loading workout...</Text>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+        <Text style={{ color: COLORS.textSecondary }}>Loading workout...</Text>
       </View>
     );
   }
@@ -168,12 +175,24 @@ export default function EditWorkoutScreen() {
   return (
     <KeyboardAvoidingView 
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={100}
     >
+      <View style={styles.header}>
+        <TouchableOpacity onPress={handleBack} style={styles.backButton}>
+          <Ionicons name="arrow-back" size={24} color={COLORS.primary} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Edit Workout</Text>
+        <TouchableOpacity onPress={saveWorkout} style={styles.saveButton} disabled={saving}>
+          {saving ? (
+            <ActivityIndicator size="small" color={COLORS.primary} />
+          ) : (
+            <Ionicons name="save" size={24} color={COLORS.primary} />
+          )}
+        </TouchableOpacity>
+      </View>
+      
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        <Text style={styles.title}>Edit Workout</Text>
-        
         {exercises.map((exercise) => (
           <View key={exercise.id} style={styles.exerciseCard}>
             <View style={styles.exerciseHeader}>
@@ -183,11 +202,11 @@ export default function EditWorkoutScreen() {
                 onChangeText={(text) => updateExerciseName(exercise.id, text)}
                 placeholder="Exercise name"
               />
-              <TouchableOpacity 
-                style={styles.deleteButton}
+              <TouchableOpacity
+                style={styles.deleteExerciseButton}
                 onPress={() => deleteExercise(exercise.id)}
               >
-                <Text style={styles.deleteButtonText}>Delete</Text>
+                <Text style={{ color: COLORS.accent }}>✕</Text>
               </TouchableOpacity>
             </View>
             
@@ -242,27 +261,6 @@ export default function EditWorkoutScreen() {
           <Text style={styles.addButtonText}>Add Exercise</Text>
         </TouchableOpacity>
       </ScrollView>
-      
-      <View style={styles.buttonContainer}>
-        <TouchableOpacity 
-          style={styles.cancelButton}
-          onPress={() => router.back()}
-          disabled={saving}
-        >
-          <Text style={styles.cancelButtonText}>Cancel</Text>
-        </TouchableOpacity>
-        <TouchableOpacity 
-          style={[styles.saveButton, saving && styles.disabledButton]}
-          onPress={saveWorkout}
-          disabled={saving}
-        >
-          {saving ? (
-            <ActivityIndicator size="small" color="white" />
-          ) : (
-            <Text style={styles.saveButtonText}>Save Changes</Text>
-          )}
-        </TouchableOpacity>
-      </View>
     </KeyboardAvoidingView>
   );
 }
@@ -270,7 +268,30 @@ export default function EditWorkoutScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: COLORS.background,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 8,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  backButton: {
+    padding: 8,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    flex: 1,
+    textAlign: 'center',
+  },
+  saveButton: {
+    padding: 8,
   },
   scrollContent: {
     padding: 20,
@@ -288,49 +309,51 @@ const styles = StyleSheet.create({
   },
   errorText: {
     fontSize: 16,
-    color: 'red',
+    color: COLORS.accent,
   },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
     marginBottom: 20,
     textAlign: 'center',
+    color: COLORS.text,
   },
   exerciseCard: {
-    backgroundColor: 'white',
+    backgroundColor: COLORS.card,
     borderRadius: 10,
     padding: 15,
     marginBottom: 15,
-    borderWidth: 1,
-    borderColor: '#eee',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 2,
     elevation: 2,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
   exerciseHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 15,
   },
   exerciseNameInput: {
     fontSize: 18,
     fontWeight: 'bold',
-    flex: 1,
-    padding: 5,
-    borderBottomWidth: 1,
-    borderBottomColor: '#ddd',
+    padding: 10,
+    marginBottom: 15,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 5,
+    color: COLORS.text,
   },
-  deleteButton: {
+  deleteExerciseButton: {
     padding: 8,
     borderRadius: 5,
-    backgroundColor: '#ffebee',
-    marginLeft: 10,
+    backgroundColor: COLORS.accent + '20', // Light version of accent color
   },
   deleteButtonText: {
-    color: '#f44336',
+    color: COLORS.accent,
     fontSize: 14,
     fontWeight: 'bold',
   },
@@ -340,7 +363,7 @@ const styles = StyleSheet.create({
   setsHeader: {
     flexDirection: 'row',
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    borderBottomColor: COLORS.border,
     paddingBottom: 8,
     marginBottom: 8,
   },
@@ -357,32 +380,34 @@ const styles = StyleSheet.create({
   setNumber: {
     flex: 1,
     textAlign: 'center',
+    color: COLORS.text,
   },
   setInput: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: COLORS.border,
     borderRadius: 4,
     padding: 8,
     marginHorizontal: 5,
     textAlign: 'center',
+    color: COLORS.text,
   },
   deleteSetButton: {
     padding: 6,
     borderRadius: 5,
-    backgroundColor: '#ffebee',
+    backgroundColor: COLORS.accent + '20', // Light version of accent color
     width: 30,
     alignItems: 'center',
   },
   addSetButton: {
-    backgroundColor: '#e7f5e7',
+    backgroundColor: COLORS.success + '20', // Light version of success color
     padding: 10,
     borderRadius: 5,
     alignItems: 'center',
     marginTop: 10,
   },
   addExerciseButton: {
-    backgroundColor: '#e7f5e7',
+    backgroundColor: COLORS.success + '20', // Light version of success color
     padding: 15,
     borderRadius: 5,
     alignItems: 'center',
@@ -390,46 +415,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   addButtonText: {
-    color: '#388E3C',
+    color: COLORS.success,
     fontWeight: 'bold',
-  },
-  buttonContainer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    padding: 15,
-    backgroundColor: '#f5f5f5',
-    borderTopWidth: 1,
-    borderTopColor: '#ddd',
-  },
-  cancelButton: {
-    flex: 1,
-    padding: 15,
-    borderRadius: 5,
-    alignItems: 'center',
-    backgroundColor: '#f5f5f5',
-    borderWidth: 1,
-    borderColor: '#ddd',
-    marginRight: 10,
-  },
-  cancelButtonText: {
-    color: '#666',
-    fontWeight: 'bold',
-  },
-  saveButton: {
-    flex: 2,
-    backgroundColor: '#4CAF50',
-    padding: 15,
-    borderRadius: 5,
-    alignItems: 'center',
-  },
-  saveButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-  },
-  disabledButton: {
-    opacity: 0.7,
   },
 }); 

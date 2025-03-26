@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as healthService from './healthService';
-import { Platform } from 'react';
+import { Platform } from 'react-native';
 
 // Types
 export interface Exercise {
@@ -307,7 +307,8 @@ export const getExerciseStats = async (exerciseName: string): Promise<any[]> => 
 // Save active workout for resuming later
 export const saveActiveWorkout = async (
   exercises: Exercise[],
-  weightUnit?: string
+  weightUnit?: string,
+  timestamp?: string
 ): Promise<boolean> => {
   try {
     // If exercises is empty, clear the active workout
@@ -318,7 +319,7 @@ export const saveActiveWorkout = async (
     
     const activeWorkout = {
       exercises,
-      timestamp: new Date().toISOString(),
+      timestamp: timestamp || new Date().toISOString(),
       weightUnit: weightUnit || 'kg'
     };
     
@@ -574,5 +575,34 @@ export const syncWorkoutToHealth = async (workout: Workout): Promise<boolean> =>
   } catch (error) {
     console.error('Error syncing to health:', error);
     return false;
+  }
+};
+
+// Get most recent weights and reps for an exercise
+export const getMostRecentExerciseData = async (exerciseName: string): Promise<{ reps: string; weight: string } | null> => {
+  try {
+    const workouts = await getWorkouts();
+    
+    // Find the most recent workout containing this exercise
+    for (const workout of workouts) {
+      for (const exercise of workout.exercises) {
+        if (exercise.name.toLowerCase() === exerciseName.toLowerCase()) {
+          // Get the last set from this exercise
+          const lastSet = exercise.sets[exercise.sets.length - 1];
+          if (lastSet) {
+            return {
+              reps: lastSet.reps,
+              weight: lastSet.weight
+            };
+          }
+          break;
+        }
+      }
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('Error getting most recent exercise data:', error);
+    return null;
   }
 }; 

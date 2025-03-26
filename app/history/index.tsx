@@ -6,11 +6,14 @@ import {
   FlatList, 
   TouchableOpacity, 
   ActivityIndicator,
-  Alert
+  Alert,
+  Platform
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as storageService from '../../services/storageService';
 import { Swipeable } from 'react-native-gesture-handler';
+import { MaterialIcons, FontAwesome5 } from '@expo/vector-icons';
+import { COLORS } from '../../services/colors';
 
 type Workout = storageService.Workout;
 
@@ -18,6 +21,8 @@ export default function HistoryScreen() {
   const router = useRouter();
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedWorkouts, setSelectedWorkouts] = useState<string[]>([]);
 
   useEffect(() => {
     loadWorkouts();
@@ -40,121 +45,159 @@ export default function HistoryScreen() {
   };
 
   const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    try {
+      const date = new Date(dateString);
+      
+      if (isNaN(date.getTime())) {
+        return "Invalid Date";
+      }
+      
+      return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { 
+        hour: '2-digit', 
+        minute: '2-digit' 
+      });
+    } catch (error) {
+      console.error('Error formatting date:', error);
+      return "Invalid Date";
+    }
   };
 
-  // Navigate to workout details
-  const navigateToWorkoutDetails = (workoutId: string) => {
-    // @ts-ignore
-    router.push({
-      pathname: "workout-details/[id]",
-      params: { id: workoutId }
-    });
+  const handleWorkoutPress = (workout: Workout) => {
+    if (selectMode) {
+      setSelectedWorkouts(prev => {
+        if (prev.includes(workout.id)) {
+          return prev.filter(id => id !== workout.id);
+        } else {
+          return [...prev, workout.id];
+        }
+      });
+    } else {
+      router.push(`/workout-details/${workout.id}`);
+    }
   };
-  
-  // Delete a workout
-  const deleteWorkout = async (workoutId: string) => {
+
+  const handleLongPress = () => {
+    setSelectMode(true);
+  };
+
+  const handleCancelSelection = () => {
+    setSelectMode(false);
+    setSelectedWorkouts([]);
+  };
+
+  const handleDeleteSelected = async () => {
     Alert.alert(
-      "Delete Workout",
-      "Are you sure you want to delete this workout?",
+      'Delete Workouts',
+      `Are you sure you want to delete ${selectedWorkouts.length} workout${selectedWorkouts.length > 1 ? 's' : ''}?`,
       [
-        { text: "Cancel", style: "cancel" },
-        { 
-          text: "Delete", 
-          style: "destructive",
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
           onPress: async () => {
             try {
-              // Create a new array without the deleted workout
-              const updatedWorkouts = workouts.filter(workout => workout.id !== workoutId);
-              
-              // Update state immediately for better UX
-              setWorkouts(updatedWorkouts);
-              
-              // Save the updated workouts list to storage
-              await storageService.deleteWorkout(workoutId);
-            } catch (error) {
-              console.error('Error deleting workout:', error);
-              Alert.alert('Error', 'Failed to delete workout');
-              // Reload workouts if delete failed
+              await Promise.all(
+                selectedWorkouts.map(id => storageService.deleteWorkout(id))
+              );
+              setSelectedWorkouts([]);
+              setSelectMode(false);
               loadWorkouts();
+            } catch (error) {
+              console.error('Error deleting workouts:', error);
+              Alert.alert('Error', 'Failed to delete workouts');
             }
-          }
-        }
+          },
+        },
       ]
     );
   };
-  
-  // Render right actions for swipeable
-  const renderRightActions = (workoutId: string) => {
-    return (
+
+  const renderWorkoutItem = ({ item }: { item: Workout }) => {
+    const isSelected = selectedWorkouts.includes(item.id);
+
+    const renderRightActions = () => (
       <TouchableOpacity
-        style={styles.deleteAction}
-        onPress={() => deleteWorkout(workoutId)}
+        style={styles.deleteButton}
+        onPress={() => handleDeleteSelected()}
       >
-        <Text style={styles.deleteActionText}>Delete</Text>
+        <MaterialIcons name="delete" size={24} color="#fff" />
       </TouchableOpacity>
+    );
+
+    return (
+      <Swipeable
+        renderRightActions={renderRightActions}
+        rightThreshold={40}
+        overshootRight={false}
+      >
+        <TouchableOpacity
+          style={[
+            styles.workoutItem,
+            isSelected && styles.selectedWorkoutItem
+          ]}
+          onPress={() => handleWorkoutPress(item)}
+          onLongPress={handleLongPress}
+        >
+          <View style={styles.workoutInfo}>
+            <Text style={styles.workoutDate}>{formatDate(item.date)}</Text>
+            <Text style={styles.workoutName}>
+              {item.exercises.length} exercise{item.exercises.length !== 1 ? 's' : ''}
+            </Text>
+          </View>
+          {isSelected && (
+            <View style={styles.checkmark}>
+              <FontAwesome5 name="check-circle" size={24} color={COLORS.primary} />
+            </View>
+          )}
+        </TouchableOpacity>
+      </Swipeable>
     );
   };
 
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#4CAF50" />
-        <Text>Loading workouts...</Text>
+        <ActivityIndicator size="large" color={COLORS.primary} />
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Workout History</Text>
-      
+      <View style={styles.header}>
+        <Text style={styles.title}>Workout History</Text>
+        {selectMode && (
+          <View style={styles.selectionActions}>
+            <TouchableOpacity
+              onPress={handleCancelSelection}
+              style={styles.actionButton}
+            >
+              <Text style={styles.actionButtonText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={handleDeleteSelected}
+              style={[styles.actionButton, styles.deleteButton]}
+            >
+              <Text style={styles.actionButtonText}>
+                Delete ({selectedWorkouts.length})
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+
       {workouts.length === 0 ? (
         <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>No workouts recorded yet</Text>
+          <Text style={styles.emptyText}>No workouts found</Text>
         </View>
       ) : (
         <FlatList
           data={workouts}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <Swipeable
-              renderRightActions={() => renderRightActions(item.id)}
-            >
-              <TouchableOpacity 
-                style={styles.workoutCard}
-                onPress={() => navigateToWorkoutDetails(item.id)}
-              >
-                <Text style={styles.dateText}>{formatDate(item.date)}</Text>
-                <Text style={styles.exerciseCount}>
-                  {item.exercises.length} {item.exercises.length === 1 ? 'exercise' : 'exercises'}
-                </Text>
-                <View style={styles.exerciseList}>
-                  {item.exercises.slice(0, 3).map((exercise, index) => (
-                    <Text key={exercise.id} style={styles.exerciseItem}>
-                      • {exercise.name} ({exercise.sets.length} {exercise.sets.length === 1 ? 'set' : 'sets'})
-                    </Text>
-                  ))}
-                  {item.exercises.length > 3 && (
-                    <Text style={styles.moreText}>+ {item.exercises.length - 3} more</Text>
-                  )}
-                </View>
-              </TouchableOpacity>
-            </Swipeable>
-          )}
+          renderItem={renderWorkoutItem}
+          keyExtractor={item => item.id}
+          contentContainerStyle={styles.list}
         />
       )}
-      
-      <TouchableOpacity 
-        style={styles.startButton}
-        onPress={() => {
-          // @ts-ignore
-          router.push("workout");
-        }}
-      >
-        <Text style={styles.buttonText}>Start New Workout</Text>
-      </TouchableOpacity>
     </View>
   );
 }
@@ -162,88 +205,85 @@ export default function HistoryScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 20,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: COLORS.background,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: COLORS.background,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    backgroundColor: COLORS.background,
   },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
-    marginBottom: 20,
-    textAlign: 'center',
+    color: COLORS.text,
+  },
+  selectionActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  actionButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: COLORS.primary,
+    marginLeft: 8,
+  },
+  actionButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  deleteButton: {
+    backgroundColor: COLORS.error,
+  },
+  list: {
+    padding: 16,
+  },
+  workoutItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: COLORS.card,
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  selectedWorkoutItem: {
+    backgroundColor: COLORS.primaryLight,
+  },
+  workoutInfo: {
+    flex: 1,
+  },
+  workoutDate: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    marginBottom: 4,
+  },
+  workoutName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: COLORS.text,
+  },
+  checkmark: {
+    marginLeft: 12,
   },
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 16,
   },
   emptyText: {
     fontSize: 16,
-    color: '#888',
+    color: COLORS.textSecondary,
+    textAlign: 'center',
   },
-  workoutCard: {
-    backgroundColor: 'white',
-    borderRadius: 10,
-    padding: 15,
-    marginBottom: 15,
-    borderWidth: 1,
-    borderColor: '#eee',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  dateText: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 5,
-  },
-  exerciseCount: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 10,
-  },
-  exerciseList: {
-    marginTop: 5,
-  },
-  exerciseItem: {
-    fontSize: 14,
-    marginBottom: 3,
-  },
-  moreText: {
-    fontSize: 14,
-    color: '#888',
-    fontStyle: 'italic',
-  },
-  startButton: {
-    backgroundColor: '#4CAF50',
-    padding: 15,
-    borderRadius: 5,
-    alignItems: 'center',
-    marginTop: 10,
-  },
-  buttonText: {
-    color: 'white',
-    fontWeight: 'bold',
-  },
-  deleteAction: {
-    backgroundColor: '#FF3B30',
-    justifyContent: 'center',
-    alignItems: 'center',
-    width: 80,
-    height: '91%',
-    marginBottom: 15,
-    borderTopRightRadius: 10,
-    borderBottomRightRadius: 10,
-  },
-  deleteActionText: {
-    color: 'white',
-    fontWeight: 'bold',
-    fontSize: 16,
-  }
 }); 
