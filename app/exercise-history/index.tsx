@@ -1204,7 +1204,7 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   graphsButtonText: {
-    color: COLORS.card,
+    color: '#fff',
     fontWeight: 'bold',
     textAlign: 'center',
     fontSize: 15,
@@ -1220,7 +1220,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   closeModalButtonText: {
-    color: COLORS.card,
+    color: '#fff',
     fontWeight: 'bold',
     textAlign: 'center',
   },

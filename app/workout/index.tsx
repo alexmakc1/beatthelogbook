@@ -362,14 +362,44 @@ export default function WorkoutScreen() {
 
   // Check for exercises from template
   useEffect(() => {
-    if (params.exercises && typeof params.exercises === 'string') {
-      try {
-        const templateExercises = JSON.parse(params.exercises);
-        setExercises(templateExercises);
-      } catch (e) {
-        console.error('Error parsing exercises from template:', e);
+    const loadTemplateExercises = async () => {
+      if (params.exercises && typeof params.exercises === 'string') {
+        try {
+          const templateExercises = JSON.parse(params.exercises);
+          
+          // For each exercise in the template, get its most recent data
+          const populatedExercises = await Promise.all(
+            templateExercises.map(async (exercise: Exercise) => {
+              const recentData = await storageService.getMostRecentExerciseData(exercise.name);
+              if (recentData) {
+                // If we have recent data, update the first set
+                if (exercise.sets.length > 0) {
+                  exercise.sets[0] = {
+                    ...exercise.sets[0],
+                    reps: recentData.reps,
+                    weight: recentData.weight
+                  };
+                } else {
+                  // If no sets exist, create one with the recent data
+                  exercise.sets = [{
+                    id: generateId(),
+                    reps: recentData.reps,
+                    weight: recentData.weight
+                  }];
+                }
+              }
+              return exercise;
+            })
+          );
+          
+          setExercises(populatedExercises);
+        } catch (e) {
+          console.error('Error parsing exercises from template:', e);
+        }
       }
-    }
+    };
+
+    loadTemplateExercises();
   }, [params.exercises]);
 
   // Handle exercise name input changes
@@ -385,13 +415,20 @@ export default function WorkoutScreen() {
   };
 
   // Add a new exercise
-  const addExercise = () => {
+  const addExercise = async () => {
     if (!newExerciseName.trim()) return;
+    
+    // Get the most recent data for this exercise
+    const recentData = await storageService.getMostRecentExerciseData(newExerciseName);
     
     const newExercise: Exercise = {
       id: generateId(),
       name: newExerciseName,
-      sets: []
+      sets: recentData ? [{
+        id: generateId(),
+        reps: recentData.reps,
+        weight: recentData.weight
+      }] : []
     };
     
     setExercises(prev => [...prev, newExercise]);
@@ -400,11 +437,18 @@ export default function WorkoutScreen() {
   };
 
   // Add a new set to an exercise
-  const addSet = (exerciseId: string) => {
+  const addSet = async (exerciseId: string) => {
+    // Find the exercise name
+    const exercise = exercises.find(ex => ex.id === exerciseId);
+    if (!exercise) return;
+
+    // Get the most recent data for this exercise
+    const recentData = await storageService.getMostRecentExerciseData(exercise.name);
+    
     const newSet: Set = {
       id: generateId(),
-      reps: '',
-      weight: ''
+      reps: recentData?.reps || '',
+      weight: recentData?.weight || ''
     };
     
     setExercises(prev => 
@@ -542,9 +586,9 @@ export default function WorkoutScreen() {
         clearInterval(timerIntervalRef.current);
       }
 
-      // Navigate to workout details with the corrected path
+      // Use replace instead of push to prevent going back to the workout screen
       // @ts-ignore - Suppressing type error for navigation path
-      router.push({
+      router.replace({
         pathname: "/workout-details/[id]",
         params: { id: workoutId }
       });
@@ -1484,7 +1528,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   buttonText: {
-    color: COLORS.card,
+    color: '#fff',
     fontWeight: 'bold',
   },
   exerciseCard: {
@@ -1524,7 +1568,7 @@ const styles = StyleSheet.create({
     marginRight: 10,
   },
   historyButtonText: {
-    color: COLORS.card,
+    color: '#fff',
     fontSize: 12,
     fontWeight: 'bold',
   },
@@ -1907,7 +1951,7 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   viewFullHistoryButtonText: {
-    color: COLORS.card,
+    color: '#fff',
     fontWeight: 'bold',
     fontSize: 15,
   },
@@ -1942,7 +1986,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   continueButtonText: {
-    color: COLORS.card,
+    color: '#fff',
     fontWeight: 'bold',
     fontSize: 16,
   },
@@ -1954,7 +1998,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   saveButtonText: {
-    color: COLORS.card,
+    color: '#fff',
     fontWeight: 'bold',
     fontSize: 16,
   },
@@ -1966,7 +2010,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   saveExitButtonText: {
-    color: COLORS.card,
+    color: '#fff',
     fontWeight: 'bold',
     fontSize: 16,
   },
@@ -2002,7 +2046,7 @@ const styles = StyleSheet.create({
     width: '48%',
   },
   resumeButtonText: {
-    color: COLORS.card,
+    color: '#fff',
     fontWeight: 'bold',
   },
 }); 

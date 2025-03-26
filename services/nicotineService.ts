@@ -1,43 +1,58 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { format, startOfDay, endOfDay, subDays, isSameDay } from 'date-fns';
 
 // Types
-export interface NicotineEntry {
+export type NicotineEntry = {
   id: string;
-  amount: number;
-  type: 'cigarette' | 'vape' | 'other';
+  amount: number; // mg per use
   timestamp: string;
-}
+};
 
-export interface NicotineStats {
+export type NicotineStats = {
   todayTotal: number;
   weeklyAverage: number;
-  monthlyTotal: number;
-  savingsThisMonth: number;
-}
+  monthlyAverage: number;
+};
 
-export interface NicotineSettings {
-  dailyLimit: number;
-  strength: number;
-  cost: number;
-  trackingMode: 'simple' | 'detailed';
-}
+export type NicotineSettings = {
+  trackingMode: 'mg' | 'frequency';
+  dailyGoal: number; // either mg or frequency count
+  defaultAmount: number; // default mg per use
+};
 
 export const DEFAULT_NICOTINE_SETTINGS: NicotineSettings = {
-  dailyLimit: 20,
-  strength: 12,
-  cost: 10,
-  trackingMode: 'simple'
+  trackingMode: 'mg',
+  dailyGoal: 24,
+  defaultAmount: 3,
 };
 
 // Storage Keys
-const ENTRIES_KEY = 'nicotine_entries';
-const SETTINGS_KEY = 'nicotine_settings';
+const STORAGE_KEYS = {
+  ENTRIES: 'nicotine_entries',
+  SETTINGS: 'nicotine_settings',
+};
 
 // Get all entries
-export const getEntries = async (): Promise<NicotineEntry[]> => {
+export const getEntries = async (date?: Date): Promise<NicotineEntry[]> => {
   try {
-    const entriesJson = await AsyncStorage.getItem(ENTRIES_KEY);
-    return entriesJson ? JSON.parse(entriesJson) : [];
+    const entriesJson = await AsyncStorage.getItem(STORAGE_KEYS.ENTRIES);
+    if (!entriesJson) return [];
+
+    const entries: NicotineEntry[] = JSON.parse(entriesJson);
+    
+    if (date) {
+      const startOfDay = new Date(date);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(date);
+      endOfDay.setHours(23, 59, 59, 999);
+      
+      return entries.filter(entry => {
+        const entryDate = new Date(entry.timestamp);
+        return entryDate >= startOfDay && entryDate <= endOfDay;
+      });
+    }
+    
+    return entries;
   } catch (error) {
     console.error('Error getting nicotine entries:', error);
     return [];
@@ -45,16 +60,17 @@ export const getEntries = async (): Promise<NicotineEntry[]> => {
 };
 
 // Add a new entry
-export const addEntry = async (entry: Omit<NicotineEntry, 'id'>): Promise<boolean> => {
+export const addEntry = async (amount: number): Promise<boolean> => {
   try {
     const entries = await getEntries();
     const newEntry: NicotineEntry = {
-      ...entry,
-      id: Date.now().toString()
+      id: Date.now().toString(),
+      amount,
+      timestamp: new Date().toISOString(),
     };
     
-    const updatedEntries = [newEntry, ...entries];
-    await AsyncStorage.setItem(ENTRIES_KEY, JSON.stringify(updatedEntries));
+    entries.push(newEntry);
+    await AsyncStorage.setItem(STORAGE_KEYS.ENTRIES, JSON.stringify(entries));
     return true;
   } catch (error) {
     console.error('Error adding nicotine entry:', error);
@@ -66,8 +82,8 @@ export const addEntry = async (entry: Omit<NicotineEntry, 'id'>): Promise<boolea
 export const deleteEntry = async (id: string): Promise<boolean> => {
   try {
     const entries = await getEntries();
-    const updatedEntries = entries.filter(entry => entry.id !== id);
-    await AsyncStorage.setItem(ENTRIES_KEY, JSON.stringify(updatedEntries));
+    const filteredEntries = entries.filter(entry => entry.id !== id);
+    await AsyncStorage.setItem(STORAGE_KEYS.ENTRIES, JSON.stringify(filteredEntries));
     return true;
   } catch (error) {
     console.error('Error deleting nicotine entry:', error);
@@ -78,8 +94,12 @@ export const deleteEntry = async (id: string): Promise<boolean> => {
 // Get nicotine settings
 export const getNicotineSettings = async (): Promise<NicotineSettings> => {
   try {
-    const settingsJson = await AsyncStorage.getItem(SETTINGS_KEY);
-    return settingsJson ? JSON.parse(settingsJson) : DEFAULT_NICOTINE_SETTINGS;
+    const settingsJson = await AsyncStorage.getItem(STORAGE_KEYS.SETTINGS);
+    if (!settingsJson) {
+      await AsyncStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(DEFAULT_NICOTINE_SETTINGS));
+      return DEFAULT_NICOTINE_SETTINGS;
+    }
+    return JSON.parse(settingsJson);
   } catch (error) {
     console.error('Error getting nicotine settings:', error);
     return DEFAULT_NICOTINE_SETTINGS;
@@ -89,7 +109,7 @@ export const getNicotineSettings = async (): Promise<NicotineSettings> => {
 // Update nicotine settings
 export const updateNicotineSettings = async (settings: NicotineSettings): Promise<boolean> => {
   try {
-    await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    await AsyncStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
     return true;
   } catch (error) {
     console.error('Error updating nicotine settings:', error);
@@ -98,46 +118,95 @@ export const updateNicotineSettings = async (settings: NicotineSettings): Promis
 };
 
 // Calculate stats
-export const getStats = async (): Promise<NicotineStats> => {
+export const getStats = async (date?: Date): Promise<NicotineStats> => {
   try {
-    const entries = await getEntries();
-    const settings = await getNicotineSettings();
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const weekAgo = new Date(today);
+    const entries = await getEntries(date);
+    const todayTotal = entries.reduce((sum, entry) => sum + entry.amount, 0);
+
+    // Get weekly average
+    const weekAgo = new Date();
     weekAgo.setDate(weekAgo.getDate() - 7);
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-
-    // Calculate today's total
-    const todayTotal = entries
-      .filter(entry => new Date(entry.timestamp) >= today)
+    const weeklyEntries = await getEntries();
+    const weeklyTotal = weeklyEntries
+      .filter(entry => new Date(entry.timestamp) >= weekAgo)
       .reduce((sum, entry) => sum + entry.amount, 0);
-
-    // Calculate weekly average
-    const weekEntries = entries.filter(entry => new Date(entry.timestamp) >= weekAgo);
-    const weeklyTotal = weekEntries.reduce((sum, entry) => sum + entry.amount, 0);
     const weeklyAverage = weeklyTotal / 7;
 
-    // Calculate monthly total
-    const monthEntries = entries.filter(entry => new Date(entry.timestamp) >= monthStart);
-    const monthlyTotal = monthEntries.reduce((sum, entry) => sum + entry.amount, 0);
-
-    // Calculate savings (based on cost per unit and monthly usage)
-    const savingsThisMonth = monthEntries.length * settings.cost;
+    // Get monthly average
+    const monthAgo = new Date();
+    monthAgo.setMonth(monthAgo.getMonth() - 1);
+    const monthlyTotal = weeklyEntries
+      .filter(entry => new Date(entry.timestamp) >= monthAgo)
+      .reduce((sum, entry) => sum + entry.amount, 0);
+    const monthlyAverage = monthlyTotal / 30;
 
     return {
       todayTotal,
       weeklyAverage,
-      monthlyTotal,
-      savingsThisMonth
+      monthlyAverage,
     };
   } catch (error) {
     console.error('Error calculating nicotine stats:', error);
     return {
       todayTotal: 0,
       weeklyAverage: 0,
-      monthlyTotal: 0,
-      savingsThisMonth: 0
+      monthlyAverage: 0,
     };
+  }
+};
+
+export const getDailyStats = async (date: Date = new Date()): Promise<{
+  total: number;
+  count: number;
+  remaining: number;
+}> => {
+  try {
+    const entries = await getEntries(date);
+    const settings = await getNicotineSettings();
+    
+    const total = entries.reduce((sum, entry) => sum + entry.amount, 0);
+    const count = entries.length;
+    
+    let remaining = 0;
+    if (settings.trackingMode === 'mg') {
+      remaining = settings.dailyGoal - total;
+    } else {
+      remaining = settings.dailyGoal - count;
+    }
+    
+    return {
+      total,
+      count,
+      remaining: Math.max(0, remaining),
+    };
+  } catch (error) {
+    console.error('Error getting daily stats:', error);
+    return {
+      total: 0,
+      count: 0,
+      remaining: 0,
+    };
+  }
+};
+
+export const getAvailableDates = async (): Promise<Date[]> => {
+  try {
+    const entries = await AsyncStorage.getItem(STORAGE_KEYS.ENTRIES);
+    if (!entries) return [];
+    
+    const allEntries: NicotineEntry[] = JSON.parse(entries);
+    const uniqueDates = new Set<string>();
+    
+    allEntries.forEach(entry => {
+      const date = format(new Date(entry.timestamp), 'yyyy-MM-dd');
+      uniqueDates.add(date);
+    });
+    
+    return Array.from(uniqueDates)
+      .map(date => new Date(date))
+      .sort((a, b) => b.getTime() - a.getTime());
+  } catch (error) {
+    console.error('Error getting available dates:', error);
+    return [];
   }
 }; 

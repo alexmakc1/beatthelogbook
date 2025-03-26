@@ -5,50 +5,47 @@ import {
   StyleSheet,
   TouchableOpacity,
   FlatList,
-  ActivityIndicator,
   Alert,
-  Modal,
-  TextInput,
-  SafeAreaView,
+  ActivityIndicator,
   RefreshControl,
-  Platform,
-  KeyboardAvoidingView
+  SafeAreaView,
+  TextInput,
+  Dimensions,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import * as nicotineService from '../../../services/nicotineService';
 import { Ionicons } from '@expo/vector-icons';
+import * as nicotineService from '../../../services/nicotineService';
 import { COLORS } from '../../../services/colors';
+import { format, addDays, subDays, isToday, isSameDay } from 'date-fns';
+
+const CIRCLE_SIZE = 120;
+const CIRCLE_STROKE_WIDTH = 12;
+const CIRCLE_RADIUS = (CIRCLE_SIZE - CIRCLE_STROKE_WIDTH) / 2;
+const CIRCLE_CENTER = CIRCLE_SIZE / 2;
 
 export default function NicotineScreen() {
   const router = useRouter();
   const [entries, setEntries] = useState<nicotineService.NicotineEntry[]>([]);
   const [stats, setStats] = useState<nicotineService.NicotineStats | null>(null);
-  const [settings, setSettings] = useState<nicotineService.NicotineSettings>(nicotineService.DEFAULT_NICOTINE_SETTINGS);
+  const [settings, setSettings] = useState<nicotineService.NicotineSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [newEntryAmount, setNewEntryAmount] = useState('');
-  const [newEntryType, setNewEntryType] = useState<'cigarette' | 'vape' | 'other'>('cigarette');
-
-  // Load data when component is focused
-  useEffect(() => {
-    loadData();
-  }, []);
+  const [amount, setAmount] = useState('3');
+  const [selectedDate, setSelectedDate] = useState(new Date());
 
   const loadData = async () => {
     try {
       setLoading(true);
       const [entriesData, statsData, settingsData] = await Promise.all([
-        nicotineService.getEntries(),
-        nicotineService.getStats(),
-        nicotineService.getNicotineSettings()
+        nicotineService.getEntries(selectedDate),
+        nicotineService.getStats(selectedDate),
+        nicotineService.getNicotineSettings(),
       ]);
       setEntries(entriesData);
       setStats(statsData);
       setSettings(settingsData);
     } catch (error) {
-      console.error('Error loading data:', error);
+      console.error('Error loading nicotine data:', error);
       Alert.alert('Error', 'Failed to load nicotine data');
     } finally {
       setLoading(false);
@@ -56,77 +53,93 @@ export default function NicotineScreen() {
     }
   };
 
-  const handleRefresh = () => {
-    setRefreshing(true);
+  useEffect(() => {
     loadData();
-  };
+  }, [selectedDate]);
 
   const handleAddEntry = async () => {
-    if (!newEntryAmount) {
-      Alert.alert('Error', 'Please enter an amount');
-      return;
-    }
-
     try {
-      const amount = parseFloat(newEntryAmount);
-      if (isNaN(amount) || amount <= 0) {
-        Alert.alert('Error', 'Please enter a valid amount');
+      const mgAmount = parseFloat(amount);
+      if (isNaN(mgAmount) || mgAmount <= 0) {
+        Alert.alert('Invalid Amount', 'Please enter a valid amount in mg');
         return;
       }
 
-      await nicotineService.addEntry({
-        amount,
-        type: newEntryType,
-        timestamp: new Date().toISOString()
-      });
-
-      setNewEntryAmount('');
-      setShowAddModal(false);
-      loadData();
+      const success = await nicotineService.addEntry(mgAmount);
+      if (success) {
+        loadData();
+        setAmount('3');
+      } else {
+        Alert.alert('Error', 'Failed to add nicotine entry');
+      }
     } catch (error) {
-      console.error('Error adding entry:', error);
+      console.error('Error adding nicotine entry:', error);
       Alert.alert('Error', 'Failed to add nicotine entry');
     }
   };
 
   const handleDeleteEntry = async (id: string) => {
-    try {
-      await nicotineService.deleteEntry(id);
-      loadData();
-    } catch (error) {
-      console.error('Error deleting entry:', error);
-      Alert.alert('Error', 'Failed to delete nicotine entry');
-    }
+    Alert.alert(
+      'Delete Entry',
+      'Are you sure you want to delete this entry?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const success = await nicotineService.deleteEntry(id);
+              if (success) {
+                loadData();
+              } else {
+                Alert.alert('Error', 'Failed to delete entry');
+              }
+            } catch (error) {
+              console.error('Error deleting nicotine entry:', error);
+              Alert.alert('Error', 'Failed to delete entry');
+            }
+          },
+        },
+      ]
+    );
   };
 
-  const handleSaveSettings = async () => {
-    try {
-      await nicotineService.updateNicotineSettings(settings);
-      setShowSettingsModal(false);
-      loadData();
-    } catch (error) {
-      console.error('Error saving settings:', error);
-      Alert.alert('Error', 'Failed to save settings');
-    }
+  const handleDateChange = (days: number) => {
+    setSelectedDate(prevDate => {
+      const newDate = days > 0 ? addDays(prevDate, days) : subDays(prevDate, -days);
+      return newDate;
+    });
   };
 
   const renderEntry = ({ item }: { item: nicotineService.NicotineEntry }) => (
     <View style={styles.entryItem}>
       <View style={styles.entryInfo}>
         <Text style={styles.entryAmount}>{item.amount} mg</Text>
-        <Text style={styles.entryType}>{item.type}</Text>
         <Text style={styles.entryTime}>
-          {new Date(item.timestamp).toLocaleString()}
+          {format(new Date(item.timestamp), 'h:mm a')}
         </Text>
       </View>
       <TouchableOpacity
         onPress={() => handleDeleteEntry(item.id)}
         style={styles.deleteButton}
       >
-        <Ionicons name="trash-outline" size={24} color={COLORS.error} />
+        <Ionicons name="trash-outline" size={20} color={COLORS.error} />
       </TouchableOpacity>
     </View>
   );
+
+  const calculateProgress = () => {
+    if (!settings) return 0;
+    const current = settings.trackingMode === 'mg' 
+      ? (stats?.todayTotal || 0)
+      : entries.length;
+    const goal = settings.dailyGoal || 1;
+    return Math.min(current / goal, 1);
+  };
+
+  const progress = calculateProgress();
+  const progressColor = progress >= 1 ? COLORS.error : COLORS.primary;
 
   if (loading) {
     return (
@@ -141,187 +154,117 @@ export default function NicotineScreen() {
       <View style={styles.header}>
         <Text style={styles.title}>Nicotine Tracker</Text>
         <TouchableOpacity
-          onPress={() => setShowSettingsModal(true)}
           style={styles.settingsButton}
+          onPress={() => router.push('../settings')}
         >
-          <Ionicons name="settings-outline" size={24} color={COLORS.primary} />
+          <Ionicons name="settings-outline" size={24} color={COLORS.text} />
         </TouchableOpacity>
       </View>
 
-      <View style={styles.statsContainer}>
-        <View style={styles.statCard}>
-          <Text style={styles.statLabel}>Today's Total</Text>
-          <Text style={styles.statValue}>{stats?.todayTotal || 0} mg</Text>
+      <View style={styles.dateNavigation}>
+        <TouchableOpacity
+          style={styles.dateButton}
+          onPress={() => handleDateChange(-1)}
+        >
+          <Ionicons name="chevron-back" size={24} color={COLORS.text} />
+        </TouchableOpacity>
+        <Text style={styles.dateText}>
+          {isToday(selectedDate)
+            ? 'Today'
+            : format(selectedDate, 'MMM d, yyyy')}
+        </Text>
+        <TouchableOpacity
+          style={styles.dateButton}
+          onPress={() => handleDateChange(1)}
+          disabled={isToday(selectedDate)}
+        >
+          <Ionicons
+            name="chevron-forward"
+            size={24}
+            color={isToday(selectedDate) ? COLORS.textSecondary : COLORS.text}
+          />
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.progressContainer}>
+        <View style={styles.circleContainer}>
+          <View style={styles.circleBackground}>
+            <View style={[
+              styles.circleProgress,
+              {
+                backgroundColor: progressColor,
+                transform: [{ scale: progress }],
+              }
+            ]} />
+            <View style={styles.circleTextContainer}>
+              <Text style={styles.circleValue}>
+                {settings?.trackingMode === 'mg'
+                  ? `${stats?.todayTotal || 0}`
+                  : `${entries.length}`}
+              </Text>
+              <Text style={styles.circleLabel}>
+                {settings?.trackingMode === 'mg' ? 'mg' : 'times'}
+              </Text>
+            </View>
+          </View>
         </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statLabel}>Weekly Average</Text>
-          <Text style={styles.statValue}>{stats?.weeklyAverage || 0} mg</Text>
+        <View style={styles.statsContainer}>
+          <View style={styles.statCard}>
+            <Text style={styles.statLabel}>Today's Usage</Text>
+            <Text style={styles.statValue}>{stats?.todayTotal || 0} mg</Text>
+            <Text style={styles.statSubValue}>{entries.length} times</Text>
+          </View>
+          <View style={styles.statCard}>
+            <Text style={styles.statLabel}>Daily Goal</Text>
+            <Text style={styles.statValue}>
+              {settings?.trackingMode === 'mg'
+                ? `${settings?.dailyGoal || 0} mg`
+                : `${settings?.dailyGoal || 0} times`}
+            </Text>
+            <Text style={styles.statSubValue}>
+              {settings?.trackingMode === 'mg'
+                ? `${Math.round((settings?.dailyGoal || 0) / (settings?.defaultAmount || 1))} times`
+                : `${Math.round((settings?.dailyGoal || 0) * (settings?.defaultAmount || 1))} mg`}
+            </Text>
+          </View>
         </View>
       </View>
+
+      {isToday(selectedDate) && (
+        <View style={styles.inputContainer}>
+          <TextInput
+            style={styles.input}
+            value={amount}
+            onChangeText={setAmount}
+            keyboardType="numeric"
+            placeholder="Amount (mg)"
+            placeholderTextColor={COLORS.textSecondary}
+          />
+          <TouchableOpacity
+            style={styles.addButton}
+            onPress={handleAddEntry}
+          >
+            <Text style={styles.addButtonText}>Add Entry</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       <FlatList
         data={entries}
         renderItem={renderEntry}
         keyExtractor={item => item.id}
+        contentContainerStyle={styles.list}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              setRefreshing(true);
+              loadData();
+            }}
+            colors={[COLORS.primary]}
+          />
         }
-        style={styles.list}
       />
-
-      <TouchableOpacity
-        onPress={() => setShowAddModal(true)}
-        style={styles.addButton}
-      >
-        <Ionicons name="add" size={24} color="#fff" />
-        <Text style={styles.addButtonText}>Add Entry</Text>
-      </TouchableOpacity>
-
-      {/* Add Entry Modal */}
-      <Modal
-        visible={showAddModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowAddModal(false)}
-      >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.modalContainer}
-        >
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Add Nicotine Entry</Text>
-            <TouchableOpacity
-              onPress={() => setShowAddModal(false)}
-              style={styles.closeButton}
-            >
-              <Ionicons name="close" size={24} color={COLORS.text} />
-            </TouchableOpacity>
-
-            <View style={styles.inputContainer}>
-              <Text style={styles.inputLabel}>Amount (mg)</Text>
-              <TextInput
-                style={styles.input}
-                value={newEntryAmount}
-                onChangeText={setNewEntryAmount}
-                keyboardType="numeric"
-                placeholder="Enter amount"
-              />
-            </View>
-
-            <View style={styles.typeContainer}>
-              <Text style={styles.inputLabel}>Type</Text>
-              <View style={styles.typeButtons}>
-                <TouchableOpacity
-                  style={[
-                    styles.typeButton,
-                    newEntryType === 'cigarette' && styles.typeButtonActive
-                  ]}
-                  onPress={() => setNewEntryType('cigarette')}
-                >
-                  <Text style={[
-                    styles.typeButtonText,
-                    newEntryType === 'cigarette' && styles.typeButtonTextActive
-                  ]}>Cigarette</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.typeButton,
-                    newEntryType === 'vape' && styles.typeButtonActive
-                  ]}
-                  onPress={() => setNewEntryType('vape')}
-                >
-                  <Text style={[
-                    styles.typeButtonText,
-                    newEntryType === 'vape' && styles.typeButtonTextActive
-                  ]}>Vape</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.typeButton,
-                    newEntryType === 'other' && styles.typeButtonActive
-                  ]}
-                  onPress={() => setNewEntryType('other')}
-                >
-                  <Text style={[
-                    styles.typeButtonText,
-                    newEntryType === 'other' && styles.typeButtonTextActive
-                  ]}>Other</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            <TouchableOpacity
-              onPress={handleAddEntry}
-              style={styles.saveButton}
-            >
-              <Text style={styles.saveButtonText}>Save Entry</Text>
-            </TouchableOpacity>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
-
-      {/* Settings Modal */}
-      <Modal
-        visible={showSettingsModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowSettingsModal(false)}
-      >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.modalContainer}
-        >
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Nicotine Settings</Text>
-            <TouchableOpacity
-              onPress={() => setShowSettingsModal(false)}
-              style={styles.closeButton}
-            >
-              <Ionicons name="close" size={24} color={COLORS.text} />
-            </TouchableOpacity>
-
-            <View style={styles.inputContainer}>
-              <Text style={styles.inputLabel}>Daily Usage Goal (mg)</Text>
-              <TextInput
-                style={styles.input}
-                value={(settings?.dailyLimit ?? 0).toString()}
-                onChangeText={(text) => setSettings({ ...settings, dailyLimit: parseFloat(text) || 0 })}
-                keyboardType="numeric"
-                placeholder="Enter daily limit"
-              />
-            </View>
-
-            <View style={styles.inputContainer}>
-              <Text style={styles.inputLabel}>Nicotine Strength (mg)</Text>
-              <TextInput
-                style={styles.input}
-                value={(settings?.strength ?? 0).toString()}
-                onChangeText={(text) => setSettings({ ...settings, strength: parseFloat(text) || 0 })}
-                keyboardType="numeric"
-                placeholder="Enter nicotine strength"
-              />
-            </View>
-
-            <View style={styles.inputContainer}>
-              <Text style={styles.inputLabel}>Cost per Unit ($)</Text>
-              <TextInput
-                style={styles.input}
-                value={(settings?.cost ?? 0).toString()}
-                onChangeText={(text) => setSettings({ ...settings, cost: parseFloat(text) || 0 })}
-                keyboardType="numeric"
-                placeholder="Enter cost per unit"
-              />
-            </View>
-
-            <TouchableOpacity
-              onPress={handleSaveSettings}
-              style={styles.saveButton}
-            >
-              <Text style={styles.saveButtonText}>Save Settings</Text>
-            </TouchableOpacity>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
     </SafeAreaView>
   );
 }
@@ -342,7 +285,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: 16,
-    backgroundColor: COLORS.background,
+    backgroundColor: COLORS.card,
   },
   title: {
     fontSize: 24,
@@ -352,150 +295,146 @@ const styles = StyleSheet.create({
   settingsButton: {
     padding: 8,
   },
-  statsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    padding: 16,
-    backgroundColor: COLORS.background,
-  },
-  statCard: {
-    backgroundColor: COLORS.card,
-    padding: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-    minWidth: 150,
-  },
-  statLabel: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    marginBottom: 8,
-  },
-  statValue: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: COLORS.text,
-  },
-  list: {
-    flex: 1,
-  },
-  entryItem: {
+  dateNavigation: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: 16,
     backgroundColor: COLORS.card,
-    marginHorizontal: 16,
-    marginVertical: 8,
-    borderRadius: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
   },
-  entryInfo: {
+  dateButton: {
+    padding: 8,
+  },
+  dateText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: COLORS.text,
+  },
+  progressContainer: {
+    padding: 16,
+    backgroundColor: COLORS.card,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  circleContainer: {
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  circleBackground: {
+    width: CIRCLE_SIZE,
+    height: CIRCLE_SIZE,
+    borderRadius: CIRCLE_SIZE / 2,
+    backgroundColor: COLORS.background,
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  circleProgress: {
+    position: 'absolute',
+    width: CIRCLE_SIZE,
+    height: CIRCLE_SIZE,
+    borderRadius: CIRCLE_SIZE / 2,
+    opacity: 0.2,
+  },
+  circleTextContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  circleValue: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: COLORS.text,
+  },
+  circleLabel: {
+    fontSize: 16,
+    color: COLORS.textSecondary,
+  },
+  statsContainer: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  statCard: {
     flex: 1,
+    backgroundColor: COLORS.background,
+    padding: 12,
+    borderRadius: 12,
+    alignItems: 'center',
   },
-  entryAmount: {
+  statLabel: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    marginBottom: 4,
+  },
+  statValue: {
     fontSize: 18,
     fontWeight: 'bold',
     color: COLORS.text,
   },
-  entryType: {
+  statSubValue: {
     fontSize: 14,
     color: COLORS.textSecondary,
-    marginTop: 4,
+    marginTop: 2,
   },
-  entryTime: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-    marginTop: 4,
+  inputContainer: {
+    flexDirection: 'row',
+    padding: 16,
+    backgroundColor: COLORS.card,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
   },
-  deleteButton: {
-    padding: 8,
+  input: {
+    flex: 1,
+    height: 48,
+    backgroundColor: COLORS.background,
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    marginRight: 8,
+    color: COLORS.text,
   },
   addButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
     backgroundColor: COLORS.primary,
-    padding: 16,
-    margin: 16,
-    borderRadius: 12,
+    borderRadius: 8,
+    paddingHorizontal: 24,
+    justifyContent: 'center',
   },
   addButtonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
-    marginLeft: 8,
   },
-  modalContainer: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  list: {
+    padding: 16,
   },
-  modalContent: {
-    backgroundColor: COLORS.background,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
-    maxHeight: '80%',
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: COLORS.text,
-    marginBottom: 20,
-  },
-  closeButton: {
-    position: 'absolute',
-    right: 20,
-    top: 20,
-  },
-  inputContainer: {
-    marginBottom: 20,
-  },
-  inputLabel: {
-    fontSize: 16,
-    color: COLORS.text,
-    marginBottom: 8,
-  },
-  input: {
-    backgroundColor: COLORS.card,
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-    color: COLORS.text,
-  },
-  typeContainer: {
-    marginBottom: 20,
-  },
-  typeButtons: {
+  entryItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-  },
-  typeButton: {
-    flex: 1,
+    alignItems: 'center',
     backgroundColor: COLORS.card,
-    padding: 12,
-    borderRadius: 8,
-    marginHorizontal: 4,
-    alignItems: 'center',
-  },
-  typeButtonActive: {
-    backgroundColor: COLORS.primary,
-  },
-  typeButtonText: {
-    color: COLORS.text,
-    fontSize: 14,
-  },
-  typeButtonTextActive: {
-    color: '#fff',
-  },
-  saveButton: {
-    backgroundColor: COLORS.primary,
     padding: 16,
-    borderRadius: 8,
-    alignItems: 'center',
+    borderRadius: 12,
+    marginBottom: 12,
   },
-  saveButtonText: {
-    color: '#fff',
+  entryInfo: {
+    flex: 1,
+  },
+  entryAmount: {
     fontSize: 16,
     fontWeight: 'bold',
+    color: COLORS.text,
+  },
+  entryTime: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    marginTop: 4,
+  },
+  deleteButton: {
+    padding: 8,
   },
 }); 

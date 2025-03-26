@@ -576,4 +576,33 @@ export const syncWorkoutToHealth = async (workout: Workout): Promise<boolean> =>
     console.error('Error syncing to health:', error);
     return false;
   }
+};
+
+// Get most recent weights and reps for an exercise
+export const getMostRecentExerciseData = async (exerciseName: string): Promise<{ reps: string; weight: string } | null> => {
+  try {
+    const workouts = await getWorkouts();
+    
+    // Find the most recent workout containing this exercise
+    for (const workout of workouts) {
+      for (const exercise of workout.exercises) {
+        if (exercise.name.toLowerCase() === exerciseName.toLowerCase()) {
+          // Get the last set from this exercise
+          const lastSet = exercise.sets[exercise.sets.length - 1];
+          if (lastSet) {
+            return {
+              reps: lastSet.reps,
+              weight: lastSet.weight
+            };
+          }
+          break;
+        }
+      }
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('Error getting most recent exercise data:', error);
+    return null;
+  }
 }; 
