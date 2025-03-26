@@ -19,7 +19,7 @@ import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import * as storageService from '../../services/storageService';
 import * as settingsService from '../../services/settingsService';
 import * as Haptics from 'expo-haptics';
-import Ionicons from '@expo/vector-icons/Ionicons';
+import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../../services/colors';
 import { Swipeable, PanGestureHandler, LongPressGestureHandler, State } from 'react-native-gesture-handler';
 import Animated, { 
@@ -29,6 +29,8 @@ import Animated, {
   useAnimatedGestureHandler,
   runOnJS
 } from 'react-native-reanimated';
+import { format } from 'date-fns';
+import { v4 as uuidv4 } from 'uuid';
 
 // Constants for array sizing
 const MAX_EXERCISES = 30; // Choose a reasonable upper limit for exercises
@@ -58,7 +60,7 @@ interface BestPerformance {
   volume: number;
   setIndex: number;
   allSets: ExerciseSet[];
-  weightUnit: string;
+  weightUnit?: string;
 }
 
 // Define interface for exercise stats
@@ -67,29 +69,8 @@ interface WorkoutStat {
   date: string;
   sets: ExerciseSet[];
   weightUnit?: string;
-}
-
-interface BestSet {
-  reps: number;
-  weight: number;
-  unit?: string;
-}
-
-interface PersonalBest {
-  weight: number;
-  reps: number;
-  date?: string;
-  unit?: string;
-}
-
-interface ExerciseStats {
-  bestSet?: BestSet;
-  bestSetDate?: string;
-  estimatedOneRepMax?: number;
-  personalBests?: {
-    [key: string]: PersonalBest;
-  };
-  workouts?: WorkoutStat[];
+  totalVolume?: number;
+  maxWeight?: number;
 }
 
 // Add completed field to the Set type if it doesn't exist
@@ -102,7 +83,6 @@ const ExerciseItem = React.memo(({
   exercise, 
   exerciseIndex, 
   deleteExercise,
-  viewExerciseHistory,
   addSet,
   deleteSet,
   updateWeight,
@@ -112,12 +92,12 @@ const ExerciseItem = React.memo(({
   moveExerciseUp,
   moveExerciseDown,
   isFirst,
-  isLast
+  isLast,
+  onViewHistory
 }: { 
   exercise: Exercise;
   exerciseIndex: number;
   deleteExercise: (id: string) => void;
-  viewExerciseHistory: (name: string) => void;
   addSet: (exerciseId: string) => void;
   deleteSet: (exerciseId: string, setId: string) => void;
   updateWeight: (exerciseId: string, setId: string, weight: string) => void;
@@ -128,6 +108,7 @@ const ExerciseItem = React.memo(({
   moveExerciseDown: (exerciseIndex: number) => void;
   isFirst: boolean;
   isLast: boolean;
+  onViewHistory: (exerciseName: string) => void;
 }) => {
   // Render a set row with swipe-to-delete
   const renderSet = (set: SetWithCompletion, index: number) => {
@@ -205,6 +186,18 @@ const ExerciseItem = React.memo(({
       <View style={styles.exerciseHeader}>
         <View style={styles.exerciseNameContainer}>
           <Text style={styles.exerciseName}>{exercise.name}</Text>
+          
+          <TouchableOpacity
+            style={styles.historyButton}
+            onPress={() => {
+              console.log(`Button pressed for ${exercise.name}`);
+              onViewHistory(exercise.name);
+            }}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="time-outline" size={12} color="#fff" style={{ marginRight: 4 }} />
+            <Text style={styles.historyButtonText}>History</Text>
+          </TouchableOpacity>
         </View>
         
         <View style={styles.exerciseActions}>
@@ -225,13 +218,6 @@ const ExerciseItem = React.memo(({
               <Ionicons name="chevron-down" size={16} color={isLast ? COLORS.border : COLORS.primary} />
             </TouchableOpacity>
           </View>
-          
-          <TouchableOpacity
-            style={styles.historyButton}
-            onPress={() => viewExerciseHistory(exercise.name)}
-          >
-            <Text style={styles.historyButtonText}>History</Text>
-          </TouchableOpacity>
           
           <TouchableOpacity
             style={styles.deleteButton}
@@ -264,8 +250,6 @@ export default function WorkoutScreen() {
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedExercise, setSelectedExercise] = useState('');
-  const [exerciseStats, setExerciseStats] = useState<ExerciseStats | null>(null);
-  const [showStatsModal, setShowStatsModal] = useState(false);
   const [hasActiveWorkout, setHasActiveWorkout] = useState(false);
   const [showRestoreModal, setShowRestoreModal] = useState(false);
   const [restoringWorkout, setRestoringWorkout] = useState(false);
@@ -275,13 +259,10 @@ export default function WorkoutScreen() {
   const [workoutStarted, setWorkoutStarted] = useState(false);
   const [workoutStartTime, setWorkoutStartTime] = useState<Date | null>(null);
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const [bestPerformance, setBestPerformance] = useState<BestPerformance | null>(null);
   const [historyDays, setHistoryDays] = useState(settingsService.DEFAULT_HISTORY_DAYS);
   const [suggestedReps, setSuggestedReps] = useState(settingsService.DEFAULT_SUGGESTED_REPS);
   const [weightUnit, setWeightUnit] = useState<settingsService.WeightUnit>(settingsService.DEFAULT_WEIGHT_UNIT);
   const [forceRefreshKey, setForceRefreshKey] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'history' | 'best' | 'suggested'>('history');
   
   // Remove all the drag-and-drop related state and refs
   const swipeableRefs = useRef<Array<Swipeable | null>>([]);
@@ -845,258 +826,6 @@ export default function WorkoutScreen() {
     );
   };
 
-  // View exercise history - updated to match exercise history page
-  const viewExerciseHistory = async (exerciseName: string) => {
-    setSelectedExercise(exerciseName);
-    setLoading(true);
-    
-    console.log(`Loading exercise history for: ${exerciseName}`);
-    
-    try {
-      // Get exercise stats from workouts
-      const workoutStats = await storageService.getExerciseStatsByWorkout(exerciseName, historyDays);
-      console.log(`Found ${workoutStats.length} workout stats`);
-      
-      // Get best performance (highest volume)
-      const best = await storageService.getBestPerformance(exerciseName, historyDays);
-      console.log('Best performance:', best ? 'Found' : 'None found');
-      
-      // Create new exerciseStats object with the same structure as the main exercise history page
-      const stats: ExerciseStats = { workouts: workoutStats };
-      
-      if (best) {
-        // Ensure weightUnit has a default value
-        const bestWithWeightUnit = {
-          ...best,
-          weightUnit: best.weightUnit || 'kg'
-        };
-        setBestPerformance(bestWithWeightUnit);
-        
-        // Add best set to stats
-        stats.bestSet = {
-          reps: parseFloat(best.reps),
-          weight: parseFloat(best.weight),
-          unit: best.weightUnit || 'kg'
-        };
-        stats.bestSetDate = best.date;
-        
-        // Calculate estimated 1RM
-        const oneRepMax = calculateOneRepMax(parseFloat(best.weight), parseFloat(best.reps));
-        stats.estimatedOneRepMax = oneRepMax;
-        
-        // Process personal bests by rep ranges
-        const personalBests: { [key: string]: PersonalBest } = {};
-        for (const workout of workoutStats) {
-          for (const set of workout.sets) {
-            const reps = set.reps;
-            const weight = parseFloat(set.weight);
-            
-            if (!personalBests[reps] || weight > personalBests[reps].weight) {
-              personalBests[reps] = {
-                weight: weight,
-                reps: parseFloat(reps),
-                date: workout.date,
-                unit: workout.weightUnit || 'kg'
-              };
-            }
-          }
-        }
-        stats.personalBests = personalBests;
-      } else {
-        setBestPerformance(null);
-      }
-      
-      // Set the exerciseStats state with our properly structured data
-      setExerciseStats(stats);
-      
-      // Show the modal
-      setShowStatsModal(true);
-    } catch (error) {
-      console.error('Error getting exercise stats:', error);
-      Alert.alert('Error', 'Failed to load exercise history');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Navigate to full exercise history screen
-  const navigateToExerciseHistory = (exerciseName: string) => {
-    // Navigate to exercise history screen with the selected exercise
-    // @ts-ignore - Suppressing type error for navigation path
-    router.push(`/exercise-history?selectedExercise=${encodeURIComponent(exerciseName)}`);
-  };
-
-  // Format date for stats
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString();
-  };
-
-  // Use focus effect to force reload the workout when screen is focused
-  useFocusEffect(
-    useCallback(() => {
-      console.log("Screen focused, checking if restore needed");
-      if (params.restore === 'true') {
-        console.log("Force restoring workout from focus effect");
-        forceRestoreWorkout();
-      }
-      
-      return () => {
-        // Cleanup on unfocus if needed
-      };
-    }, [params.restore])
-  );
-
-  // Force restore the active workout regardless of current state
-  const forceRestoreWorkout = async () => {
-    console.log("Force restoring workout");
-    try {
-      const activeWorkout = await storageService.getActiveWorkout();
-      console.log("Force restore: active workout found:", 
-        activeWorkout ? `Found with ${activeWorkout.exercises?.length || 0} exercises` : "Not found");
-      
-      if (activeWorkout && activeWorkout.exercises && activeWorkout.exercises.length > 0) {
-        // First reset all related state
-        if (timerIntervalRef.current) {
-          clearInterval(timerIntervalRef.current);
-          timerIntervalRef.current = null;
-        }
-        
-        // Set exercises from active workout
-        setExercises(activeWorkout.exercises);
-        
-        // Restore timer state
-        if (activeWorkout.timestamp) {
-          console.log("Force restore: Setting timer from timestamp:", activeWorkout.timestamp);
-          const startTime = new Date(activeWorkout.timestamp);
-          setWorkoutStartTime(startTime);
-          setWorkoutStarted(true);
-          
-          // Calculate elapsed time
-          const now = new Date();
-          const initialElapsed = Math.floor((now.getTime() - startTime.getTime()) / 1000);
-          setElapsedTime(initialElapsed);
-          
-          // Start a new timer
-          timerIntervalRef.current = setInterval(() => {
-            setElapsedTime(prev => prev + 1);
-          }, 1000);
-        } else {
-          // Start a new timer if no timestamp
-          const now = new Date();
-          setWorkoutStartTime(now);
-          setWorkoutStarted(true);
-          setElapsedTime(0);
-          
-          timerIntervalRef.current = setInterval(() => {
-            setElapsedTime(prev => prev + 1);
-          }, 1000);
-          
-          // Save with the new timestamp
-          storageService.saveActiveWorkout(activeWorkout.exercises, weightUnit, now.toISOString());
-        }
-        
-        // Force a re-render by changing the key
-        setForceRefreshKey(prev => prev + 1);
-      } else {
-        console.warn('No active workout found to force restore');
-      }
-    } catch (error) {
-      console.error('Error force restoring workout:', error);
-    }
-  };
-
-  // Function to handle going back to the main screen
-  const handleBack = () => {
-    // If there's an active workout, confirm before navigating away
-    if (exercises.length > 0) {
-      setShowCancelModal(true);
-    } else {
-      router.back();
-    }
-  };
-
-  // Save the active workout with current timer state
-  const saveActiveWorkoutState = async () => {
-    // If workout has exercises and timer is running, save with timestamp
-    if (exercises.length > 0) {
-      try {
-        // If timer is running, make sure we have a start time
-        if (workoutStarted && !workoutStartTime) {
-          const now = new Date();
-          setWorkoutStartTime(now);
-          await storageService.saveActiveWorkout(exercises, weightUnit, now.toISOString());
-        } else if (workoutStarted && workoutStartTime) {
-          // Timer is running and we have a start time
-          await storageService.saveActiveWorkout(exercises, weightUnit, workoutStartTime.toISOString());
-        } else {
-          // No timer but we have exercises
-          await storageService.saveActiveWorkout(exercises, weightUnit);
-        }
-        
-        console.log('Workout state saved successfully with timestamp');
-      } catch (error) {
-        console.error('Error saving workout state:', error);
-      }
-    }
-  };
-
-  // Use effect to autosave the workout state every minute
-  useEffect(() => {
-    // Set up autosave interval
-    const autosaveInterval = setInterval(() => {
-      if (exercises.length > 0) {
-        saveActiveWorkoutState();
-      }
-    }, 60000); // Save every minute
-    
-    return () => {
-      clearInterval(autosaveInterval);
-    };
-  }, [exercises, workoutStarted, workoutStartTime, weightUnit]);
-
-  // Use effect to save when exercises change
-  useEffect(() => {
-    // Don't save if exercises are empty (e.g., just initialized)
-    if (exercises.length > 0) {
-      saveActiveWorkoutState();
-    }
-  }, [exercises]);
-
-  // Handle back button press
-  useEffect(() => {
-    const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (exercises.length > 0) {
-        setShowCancelModal(true);
-        return true; // Prevent default behavior
-      }
-      return false; // Allow default behavior
-    });
-    
-    return () => backHandler.remove();
-  }, [exercises]);
-  
-  // Continue workout without canceling
-  const continueWorkout = () => {
-    setShowCancelModal(false);
-  };
-
-  // Add a function to toggle completion status of a set
-  const toggleSetCompletion = (exerciseId: string, setId: string) => {
-    setExercises(exercises.map(exercise => 
-      exercise.id === exerciseId 
-        ? {
-            ...exercise,
-            sets: exercise.sets.map(set => 
-              set.id === setId 
-                ? { ...set, completed: !(set as SetWithCompletion).completed }
-                : set
-            )
-          }
-        : exercise
-    ));
-  };
-
   // Add functions to move exercises up and down
   const moveExerciseUp = (exerciseIndex: number) => {
     if (exerciseIndex <= 0) return;
@@ -1138,112 +867,553 @@ export default function WorkoutScreen() {
     swipeableRefs.current[swipeableIndex] = ref;
   }, []);
 
+  // Add the function to handle going back to the main screen
+  const handleBack = () => {
+    // If there's an active workout, confirm before navigating away
+    if (exercises.length > 0) {
+      setShowCancelModal(true);
+    } else {
+      router.back();
+    }
+  };
+
+  // Add a function to toggle completion status of a set
+  const toggleSetCompletion = (exerciseId: string, setId: string) => {
+    setExercises(exercises.map(exercise => 
+      exercise.id === exerciseId 
+        ? {
+            ...exercise,
+            sets: exercise.sets.map(set => 
+              set.id === setId 
+                ? { ...set, completed: !(set as SetWithCompletion).completed }
+                : set
+            )
+          }
+        : exercise
+    ));
+  };
+
+  // 1. Add state for modal at the top of WorkoutScreen
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [selectedHistoryExercise, setSelectedHistoryExercise] = useState('');
+  const [historyData, setHistoryData] = useState<WorkoutStat[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<'history' | 'best' | 'suggested'>('history');
+  const [bestPerformance, setBestPerformance] = useState<BestPerformance | null>(null);
+
+  // 2. Replace the navigateToExerciseHistory function with a direct modal approach
+  const showExerciseHistory = useCallback(async (exerciseName: string) => {
+    console.log(`Opening modal for: ${exerciseName}`);
+    setSelectedHistoryExercise(exerciseName);
+    setHistoryLoading(true);
+    setShowHistoryModal(true);
+    setActiveTab('history');
+    
+    try {
+      // Fetch history data
+      const workoutStats = await storageService.getExerciseStatsByWorkout(exerciseName, historyDays);
+      console.log(`Found ${workoutStats.length} workout stats for ${exerciseName}`);
+      
+      // Add total volume to each workout for display
+      const enhancedStats = workoutStats.map(workout => {
+        // Calculate total volume
+        const totalVolume = workout.sets.reduce((sum: number, set: ExerciseSet) => {
+          return sum + (parseFloat(set.weight) || 0) * (parseFloat(set.reps) || 0);
+        }, 0);
+        
+        // Find max weight
+        const maxWeight = workout.sets.reduce((max: number, set: ExerciseSet) => {
+          const weight = parseFloat(set.weight) || 0;
+          return weight > max ? weight : max;
+        }, 0);
+        
+        return {
+          ...workout,
+          totalVolume: totalVolume,
+          maxWeight: maxWeight
+        };
+      });
+      
+      setHistoryData(enhancedStats);
+      
+      // Fetch best performance data
+      const best = await storageService.getBestPerformance(exerciseName, historyDays);
+      setBestPerformance(best);
+    } catch (error) {
+      console.error('Error loading history:', error);
+      setHistoryData([]);
+      setBestPerformance(null);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [historyDays]);
+
   return (
-    <View style={styles.container} key={`workout-container-${forceRefreshKey}`}>
-      <ScrollView contentContainerStyle={styles.contentContainer}>
-        <View style={styles.topSection}>
-          {workoutStarted && (
-            <View style={styles.timerContainer}>
-              <Text style={styles.timerLabel}>Workout Time</Text>
-              <Text style={styles.timerDisplay}>{formatTime(elapsedTime)}</Text>
+    <>
+      <View style={styles.container} key={`workout-container-${forceRefreshKey}`}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={handleBack} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={24} color={COLORS.primary} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Workout</Text>
+          <View style={styles.headerRight} />
+        </View>
+        
+        <ScrollView contentContainerStyle={styles.contentContainer}>
+          <View style={styles.topSection}>
+            {workoutStarted && (
+              <View style={styles.timerContainer}>
+                <Text style={styles.timerLabel}>Workout Time</Text>
+                <Text style={styles.timerDisplay}>{formatTime(elapsedTime)}</Text>
+              </View>
+            )}
+          
+            <View style={styles.addExerciseContainer}>
+              <View style={styles.autocompleteContainer}>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter exercise name"
+                  value={newExerciseName}
+                  onChangeText={handleExerciseNameChange}
+                  onFocus={() => setShowSuggestions(newExerciseName.trim().length > 0)}
+                />
+                
+                {showSuggestions && suggestions.length > 0 && (
+                  <View style={styles.suggestionsContainer}>
+                    <FlatList
+                      data={suggestions}
+                      keyExtractor={(item) => item}
+                      renderItem={({ item }) => (
+                        <TouchableOpacity
+                          style={styles.suggestionItem}
+                          onPress={() => selectSuggestion(item)}
+                        >
+                          <Text>{item}</Text>
+                        </TouchableOpacity>
+                      )}
+                      style={styles.suggestionsList}
+                    />
+                  </View>
+                )}
+              </View>
+              
+              <TouchableOpacity 
+                style={styles.addButton}
+                onPress={addExercise}
+              >
+                <Text style={styles.buttonText}>Add</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+          
+          {exercises.length === 0 && (
+            <View style={styles.emptyWorkoutContainer}>
+              <Ionicons name="barbell-outline" size={60} color={COLORS.primaryLight} />
+              <Text style={styles.emptyWorkoutText}>
+                Your workout is empty. Add exercises to get started.
+              </Text>
             </View>
           )}
-        
-          <View style={styles.addExerciseContainer}>
-            <View style={styles.autocompleteContainer}>
-              <TextInput
-                style={styles.input}
-                placeholder="Enter exercise name"
-                value={newExerciseName}
-                onChangeText={handleExerciseNameChange}
-                onFocus={() => setShowSuggestions(newExerciseName.trim().length > 0)}
+          
+          <View style={styles.exercisesContainer}>
+            {exercises.map((exercise, exerciseIndex) => (
+              <ExerciseItem 
+                key={exercise.id}
+                exercise={exercise}
+                exerciseIndex={exerciseIndex}
+                deleteExercise={deleteExercise}
+                addSet={addSet}
+                deleteSet={deleteSet}
+                updateWeight={updateWeight}
+                updateReps={updateReps}
+                toggleSetCompletion={toggleSetCompletion}
+                handleSwipeableRef={handleSwipeableRef}
+                moveExerciseUp={moveExerciseUp}
+                moveExerciseDown={moveExerciseDown}
+                isFirst={exerciseIndex === 0}
+                isLast={exerciseIndex === exercises.length - 1}
+                onViewHistory={showExerciseHistory}
               />
+            ))}
+          </View>
+          
+          {exercises.length > 0 && (
+            <View style={styles.actionContainer}>
+              <TouchableOpacity
+                style={styles.completeButton}
+                onPress={handleSaveWorkout}
+                disabled={saving}
+              >
+                {saving ? (
+                  <ActivityIndicator color="white" />
+                ) : (
+                  <Text style={styles.buttonText}>Complete Workout</Text>
+                )}
+              </TouchableOpacity>
               
-              {showSuggestions && suggestions.length > 0 && (
-                <View style={styles.suggestionsContainer}>
-                  <FlatList
-                    data={suggestions}
-                    keyExtractor={(item) => item}
-                    renderItem={({ item }) => (
-                      <TouchableOpacity
-                        style={styles.suggestionItem}
-                        onPress={() => selectSuggestion(item)}
-                      >
-                        <Text>{item}</Text>
-                      </TouchableOpacity>
-                    )}
-                    style={styles.suggestionsList}
-                  />
-                </View>
-              )}
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={handleCancelWorkout}
+              >
+                <Text style={styles.cancelButtonText}>Cancel Workout</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </ScrollView>
+      </View>
+      
+      {/* Exercise history modal */}
+      {showHistoryModal && (
+        <View style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0, 
+          backgroundColor: 'rgba(0,0,0,0.8)',
+          zIndex: 9999,
+          justifyContent: 'center',
+          alignItems: 'center',
+        }}>
+          <View style={{
+            width: '90%',
+            backgroundColor: 'white',
+            padding: 20,
+            borderRadius: 10,
+            maxHeight: '80%',
+          }}>
+            <View style={{
+              flexDirection: 'row',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: 15,
+              borderBottomWidth: 1,
+              borderBottomColor: COLORS.border,
+              paddingBottom: 10,
+            }}>
+              <Text style={{fontSize: 20, fontWeight: 'bold', color: COLORS.text}}>{selectedHistoryExercise}</Text>
+              <TouchableOpacity 
+                onPress={() => {
+                  console.log('Closing modal');
+                  setShowHistoryModal(false);
+                }}
+              >
+                <Ionicons name="close" size={24} color={COLORS.text} />
+              </TouchableOpacity>
             </View>
             
-            <TouchableOpacity 
-              style={styles.addButton}
-              onPress={addExercise}
-            >
-              <Text style={styles.buttonText}>Add</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-        
-        {exercises.length === 0 && (
-          <View style={styles.emptyWorkoutContainer}>
-            <Ionicons name="barbell-outline" size={60} color={COLORS.primaryLight} />
-            <Text style={styles.emptyWorkoutText}>
-              Your workout is empty. Add exercises to get started.
-            </Text>
-          </View>
-        )}
-        
-        <View style={styles.exercisesContainer}>
-          {exercises.map((exercise, exerciseIndex) => (
-            <ExerciseItem 
-              key={exercise.id}
-              exercise={exercise}
-              exerciseIndex={exerciseIndex}
-              deleteExercise={deleteExercise}
-              viewExerciseHistory={viewExerciseHistory}
-              addSet={addSet}
-              deleteSet={deleteSet}
-              updateWeight={updateWeight}
-              updateReps={updateReps}
-              toggleSetCompletion={toggleSetCompletion}
-              handleSwipeableRef={handleSwipeableRef}
-              moveExerciseUp={moveExerciseUp}
-              moveExerciseDown={moveExerciseDown}
-              isFirst={exerciseIndex === 0}
-              isLast={exerciseIndex === exercises.length - 1}
-            />
-          ))}
-        </View>
-        
-        {exercises.length > 0 && (
-          <View style={styles.actionContainer}>
-            <TouchableOpacity
-              style={styles.completeButton}
-              onPress={handleSaveWorkout}
-              disabled={saving}
-            >
-              {saving ? (
-                <ActivityIndicator color="white" />
-              ) : (
-                <Text style={styles.buttonText}>Complete Workout</Text>
-              )}
-            </TouchableOpacity>
+            {/* Tabs */}
+            <View style={{
+              flexDirection: 'row',
+              borderBottomWidth: 1,
+              borderBottomColor: COLORS.border,
+              marginBottom: 15,
+            }}>
+              <TouchableOpacity 
+                style={{
+                  flex: 1,
+                  paddingVertical: 10,
+                  alignItems: 'center',
+                  borderBottomWidth: 2,
+                  borderBottomColor: activeTab === 'history' ? COLORS.primary : 'transparent',
+                }}
+                onPress={() => setActiveTab('history')}
+              >
+                <Text style={{
+                  color: activeTab === 'history' ? COLORS.primary : COLORS.textSecondary,
+                  fontWeight: activeTab === 'history' ? 'bold' : 'normal',
+                }}>History</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={{
+                  flex: 1,
+                  paddingVertical: 10,
+                  alignItems: 'center',
+                  borderBottomWidth: 2,
+                  borderBottomColor: activeTab === 'best' ? COLORS.primary : 'transparent',
+                }}
+                onPress={() => setActiveTab('best')}
+              >
+                <Text style={{
+                  color: activeTab === 'best' ? COLORS.primary : COLORS.textSecondary,
+                  fontWeight: activeTab === 'best' ? 'bold' : 'normal',
+                }}>Best Set</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={{
+                  flex: 1,
+                  paddingVertical: 10,
+                  alignItems: 'center',
+                  borderBottomWidth: 2,
+                  borderBottomColor: activeTab === 'suggested' ? COLORS.primary : 'transparent',
+                }}
+                onPress={() => setActiveTab('suggested')}
+              >
+                <Text style={{
+                  color: activeTab === 'suggested' ? COLORS.primary : COLORS.textSecondary,
+                  fontWeight: activeTab === 'suggested' ? 'bold' : 'normal',
+                }}>Suggested</Text>
+              </TouchableOpacity>
+            </View>
             
-            <TouchableOpacity
-              style={styles.cancelButton}
-              onPress={handleCancelWorkout}
-            >
-              <Text style={styles.cancelButtonText}>Cancel Workout</Text>
-            </TouchableOpacity>
+            {historyLoading ? (
+              <View style={{alignItems: 'center', justifyContent: 'center', padding: 20}}>
+                <ActivityIndicator size="large" color={COLORS.primary} />
+                <Text style={{marginTop: 10, fontSize: 16}}>Loading history...</Text>
+              </View>
+            ) : (
+              <>
+                {/* History Tab Content */}
+                {activeTab === 'history' && (
+                  <ScrollView style={{maxHeight: '90%'}}>
+                    {historyData.length === 0 ? (
+                      <View style={{alignItems: 'center', justifyContent: 'center', padding: 20}}>
+                        <Ionicons name="fitness-outline" size={60} color={COLORS.border} />
+                        <Text style={{fontSize: 18, fontWeight: 'bold', marginVertical: 10}}>No workout history found</Text>
+                        <Text style={{textAlign: 'center', color: COLORS.textSecondary}}>
+                          Complete a workout with this exercise to see your history.
+                        </Text>
+                      </View>
+                    ) : (
+                      historyData.map((workout, index) => (
+                        <View key={`workout-${index}`} style={{
+                          marginBottom: 15, 
+                          borderWidth: 1, 
+                          borderColor: COLORS.border,
+                          borderRadius: 8,
+                          padding: 12,
+                        }}>
+                          <Text style={{fontSize: 16, fontWeight: 'bold', color: COLORS.primary, marginBottom: 10}}>
+                            {new Date(workout.date).toLocaleDateString('en-US', {
+                              weekday: 'short',
+                              month: 'short',
+                              day: 'numeric',
+                              year: 'numeric'
+                            })}
+                          </Text>
+                          
+                          <View style={{
+                            flexDirection: 'row',
+                            justifyContent: 'space-between',
+                            backgroundColor: COLORS.primaryLight,
+                            borderRadius: 8,
+                            padding: 10,
+                            marginBottom: 10,
+                          }}>
+                            <View style={{alignItems: 'center'}}>
+                              <Text style={{fontSize: 12, color: COLORS.primary, marginBottom: 4}}>Total Sets</Text>
+                              <Text style={{fontSize: 16, fontWeight: 'bold'}}>{workout.sets.length}</Text>
+                            </View>
+                            
+                            <View style={{alignItems: 'center'}}>
+                              <Text style={{fontSize: 12, color: COLORS.primary, marginBottom: 4}}>Total Volume</Text>
+                              <Text style={{fontSize: 16, fontWeight: 'bold'}}>
+                                {workout.totalVolume?.toFixed(0)} {workout.weightUnit || weightUnit}
+                              </Text>
+                            </View>
+                            
+                            <View style={{alignItems: 'center'}}>
+                              <Text style={{fontSize: 12, color: COLORS.primary, marginBottom: 4}}>Max Weight</Text>
+                              <Text style={{fontSize: 16, fontWeight: 'bold'}}>
+                                {workout.maxWeight} {workout.weightUnit || weightUnit}
+                              </Text>
+                            </View>
+                          </View>
+                          
+                          <View style={{
+                            borderWidth: 1,
+                            borderColor: COLORS.border,
+                            borderRadius: 8,
+                            overflow: 'hidden',
+                          }}>
+                            <View style={{
+                              flexDirection: 'row',
+                              backgroundColor: COLORS.primaryLight,
+                              paddingVertical: 8,
+                            }}>
+                              <Text style={{flex: 0.5, fontWeight: 'bold', textAlign: 'center', color: COLORS.primary}}>Set</Text>
+                              <Text style={{flex: 1, fontWeight: 'bold', textAlign: 'center', color: COLORS.primary}}>Weight</Text>
+                              <Text style={{flex: 1, fontWeight: 'bold', textAlign: 'center', color: COLORS.primary}}>Reps</Text>
+                              <Text style={{flex: 1, fontWeight: 'bold', textAlign: 'center', color: COLORS.primary}}>Volume</Text>
+                            </View>
+                            
+                            {workout.sets.map((set, setIndex) => {
+                              const volume = (parseFloat(set.weight) || 0) * (parseFloat(set.reps) || 0);
+                              return (
+                                <View key={`set-${setIndex}`} style={{
+                                  flexDirection: 'row',
+                                  borderTopWidth: 1,
+                                  borderTopColor: COLORS.border,
+                                  paddingVertical: 8,
+                                }}>
+                                  <Text style={{flex: 0.5, textAlign: 'center'}}>{setIndex + 1}</Text>
+                                  <Text style={{flex: 1, textAlign: 'center'}}>{set.weight} {workout.weightUnit || weightUnit}</Text>
+                                  <Text style={{flex: 1, textAlign: 'center'}}>{set.reps}</Text>
+                                  <Text style={{flex: 1, textAlign: 'center'}}>{volume.toFixed(0)}</Text>
+                                </View>
+                              );
+                            })}
+                          </View>
+                        </View>
+                      ))
+                    )}
+                  </ScrollView>
+                )}
+                
+                {/* Best Performance Tab Content */}
+                {activeTab === 'best' && (
+                  <ScrollView style={{maxHeight: '90%'}}>
+                    {!bestPerformance ? (
+                      <View style={{alignItems: 'center', justifyContent: 'center', padding: 20}}>
+                        <Ionicons name="trophy-outline" size={60} color={COLORS.border} />
+                        <Text style={{fontSize: 18, fontWeight: 'bold', marginVertical: 10}}>No performance data found</Text>
+                        <Text style={{textAlign: 'center', color: COLORS.textSecondary}}>
+                          Complete a workout with this exercise to see your best performance.
+                        </Text>
+                      </View>
+                    ) : (
+                      <View style={{
+                        borderWidth: 1,
+                        borderColor: COLORS.primary,
+                        borderRadius: 8,
+                        padding: 15,
+                        backgroundColor: 'rgba(30, 136, 229, 0.05)',
+                      }}>
+                        <Text style={{fontSize: 18, fontWeight: 'bold', marginBottom: 15, color: COLORS.primary}}>
+                          Best Performance
+                        </Text>
+                        
+                        <Text style={{fontSize: 16, marginBottom: 10}}>
+                          Date: {new Date(bestPerformance.date).toLocaleDateString('en-US', {
+                            weekday: 'short',
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric'
+                          })}
+                        </Text>
+                        
+                        <View style={{
+                          backgroundColor: COLORS.primaryLight,
+                          borderRadius: 8,
+                          padding: 15,
+                          marginBottom: 15,
+                        }}>
+                          <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10}}>
+                            <View style={{alignItems: 'center', flex: 1}}>
+                              <Text style={{fontSize: 14, color: COLORS.primary}}>Weight</Text>
+                              <Text style={{fontSize: 24, fontWeight: 'bold'}}>
+                                {bestPerformance.weight} {bestPerformance.weightUnit || weightUnit}
+                              </Text>
+                            </View>
+                            
+                            <View style={{alignItems: 'center', flex: 1}}>
+                              <Text style={{fontSize: 14, color: COLORS.primary}}>Reps</Text>
+                              <Text style={{fontSize: 24, fontWeight: 'bold'}}>{bestPerformance.reps}</Text>
+                            </View>
+                          </View>
+                          
+                          <View style={{alignItems: 'center'}}>
+                            <Text style={{fontSize: 14, color: COLORS.primary}}>Total Volume</Text>
+                            <Text style={{fontSize: 24, fontWeight: 'bold'}}>
+                              {bestPerformance.volume.toFixed(0)} {bestPerformance.weightUnit || weightUnit}
+                            </Text>
+                          </View>
+                        </View>
+                        
+                        <Text style={{fontSize: 16, fontWeight: 'bold', marginBottom: 10}}>
+                          Estimated One-Rep Max:
+                        </Text>
+                        
+                        <View style={{
+                          backgroundColor: '#f0f0f0',
+                          borderRadius: 8,
+                          padding: 15,
+                          alignItems: 'center',
+                        }}>
+                          <Text style={{fontSize: 20, fontWeight: 'bold', color: COLORS.text}}>
+                            {calculateOneRepMax(
+                              parseFloat(bestPerformance.weight), 
+                              parseFloat(bestPerformance.reps)
+                            ).toFixed(1)} {bestPerformance.weightUnit || weightUnit}
+                          </Text>
+                        </View>
+                      </View>
+                    )}
+                  </ScrollView>
+                )}
+                
+                {/* Suggested Weights Tab Content */}
+                {activeTab === 'suggested' && (
+                  <ScrollView style={{maxHeight: '90%'}}>
+                    {!bestPerformance ? (
+                      <View style={{alignItems: 'center', justifyContent: 'center', padding: 20}}>
+                        <Ionicons name="calculator-outline" size={60} color={COLORS.border} />
+                        <Text style={{fontSize: 18, fontWeight: 'bold', marginVertical: 10}}>No data to suggest weights</Text>
+                        <Text style={{textAlign: 'center', color: COLORS.textSecondary}}>
+                          Complete a workout with this exercise to get weight suggestions.
+                        </Text>
+                      </View>
+                    ) : (
+                      <View style={{padding: 5}}>
+                        <Text style={{fontSize: 16, fontWeight: 'bold', marginBottom: 15}}>
+                          Suggested weights based on your best set: {bestPerformance.weight}{bestPerformance.weightUnit || weightUnit} × {bestPerformance.reps} reps
+                        </Text>
+                        
+                        <View style={{
+                          borderWidth: 1,
+                          borderColor: COLORS.border,
+                          borderRadius: 8,
+                          overflow: 'hidden',
+                        }}>
+                          <View style={{
+                            flexDirection: 'row',
+                            backgroundColor: COLORS.primaryLight,
+                            paddingVertical: 10,
+                          }}>
+                            <Text style={{flex: 1, fontWeight: 'bold', textAlign: 'center', color: COLORS.primary}}>Reps</Text>
+                            <Text style={{flex: 1, fontWeight: 'bold', textAlign: 'center', color: COLORS.primary}}>Weight ({bestPerformance.weightUnit || weightUnit})</Text>
+                            <Text style={{flex: 1, fontWeight: 'bold', textAlign: 'center', color: COLORS.primary}}>% of 1RM</Text>
+                          </View>
+                          
+                          {[1, 2, 3, 4, 5, 6, 8, 10, 12, 15].map(reps => {
+                            const oneRepMax = calculateOneRepMax(
+                              parseFloat(bestPerformance.weight), 
+                              parseFloat(bestPerformance.reps)
+                            );
+                            const suggestedWeight = calculateSuggestedWeight(oneRepMax, reps);
+                            const percentage = ((1.0278 - 0.0278 * reps) * 100).toFixed(0);
+                            
+                            return (
+                              <View key={`reps-${reps}`} style={{
+                                flexDirection: 'row',
+                                borderTopWidth: 1,
+                                borderTopColor: COLORS.border,
+                                paddingVertical: 10,
+                                backgroundColor: reps === parseInt(bestPerformance.reps) ? 'rgba(30, 136, 229, 0.1)' : 'transparent',
+                              }}>
+                                <Text style={{flex: 1, textAlign: 'center', fontWeight: 'bold'}}>{reps}</Text>
+                                <Text style={{flex: 1, textAlign: 'center'}}>{suggestedWeight.toFixed(1)}</Text>
+                                <Text style={{flex: 1, textAlign: 'center'}}>{percentage}%</Text>
+                              </View>
+                            );
+                          })}
+                        </View>
+                        
+                        <Text style={{fontSize: 14, color: COLORS.textSecondary, marginTop: 10, textAlign: 'center'}}>
+                          Based on the formula: weight = 1RM × (1.0278 - 0.0278 × reps)
+                        </Text>
+                      </View>
+                    )}
+                  </ScrollView>
+                )}
+              </>
+            )}
           </View>
-        )}
-      </ScrollView>
-      
-      {/* ... rest of the component ... */}
-    </View>
+        </View>
+      )}
+    </>
   );
 }
 
@@ -1397,18 +1567,6 @@ const styles = StyleSheet.create({
   orderButtonDisabled: {
     backgroundColor: 'rgba(200, 200, 200, 0.1)',
   },
-  historyButton: {
-    backgroundColor: COLORS.primary,
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    borderRadius: 4,
-    marginRight: 6,
-  },
-  historyButtonText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
   deleteButton: {
     padding: 6,
     borderRadius: 4,
@@ -1528,5 +1686,185 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(200, 200, 200, 0.3)',
     color: COLORS.textSecondary,
     borderColor: 'rgba(200, 200, 200, 0.5)',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'ios' ? 50 : 16,
+    paddingBottom: 8,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+    zIndex: 10,
+  },
+  backButton: {
+    padding: 8,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    flex: 1,
+    textAlign: 'center',
+  },
+  headerRight: {
+    width: 40,
+  },
+  historyButton: {
+    backgroundColor: COLORS.primary,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 6,
+    marginTop: 8,
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  historyButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 9999,
+  },
+  modalContainer: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    width: '90%',
+    minHeight: 200,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.5,
+    shadowRadius: 4,
+    elevation: 10,
+    borderWidth: 2,
+    borderColor: COLORS.primary,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: COLORS.text,
+    flex: 1,
+  },
+  closeButton: {
+    padding: 8,
+  },
+  modalContent: {
+    flex: 1,
+  },
+  noDataContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 30,
+    marginTop: 20,
+  },
+  noDataTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: COLORS.textSecondary,
+    marginTop: 20,
+    marginBottom: 10,
+  },
+  noDataText: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+  },
+  workoutCard: {
+    backgroundColor: COLORS.card,
+    borderRadius: 8,
+    padding: 15,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  workoutDate: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: COLORS.primary,
+    marginBottom: 12,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    backgroundColor: COLORS.primaryLight,
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+  },
+  statItem: {
+    alignItems: 'center',
+  },
+  statLabel: {
+    fontSize: 12,
+    color: COLORS.primary,
+    marginBottom: 4,
+  },
+  statValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: COLORS.text,
+  },
+  setsTable: {
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  tableHeader: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.primaryLight,
+    paddingVertical: 8,
+  },
+  tableRow: {
+    flexDirection: 'row',
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+    paddingVertical: 8,
+  },
+  headerCell: {
+    fontWeight: 'bold',
+    color: COLORS.primary,
+  },
+  tableCell: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 14,
+    color: COLORS.text,
+  },
+  historyLoader: {
+    marginVertical: 20,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: COLORS.primary,
   },
 }); 

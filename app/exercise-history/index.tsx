@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -61,6 +61,7 @@ interface PersonalBest {
 }
 
 interface ExerciseStats {
+  exerciseName: string;
   bestSet?: BestSet;
   bestSetDate?: string;
   estimatedOneRepMax?: number;
@@ -205,6 +206,63 @@ const LineChart = ({ data, width, height, color }: any) => {
   );
 };
 
+// Update the WorkoutHistoryItem component to display more detailed information
+const WorkoutHistoryItem = ({ workout, index, weightUnit }: { workout: WorkoutStat, index: number, weightUnit: settingsService.WeightUnit }) => {
+  // Calculate total volume and max weight
+  const totalVolume = workout.sets.reduce((sum, set) => {
+    return sum + (parseFloat(set.weight) || 0) * (parseFloat(set.reps) || 0);
+  }, 0);
+  
+  const maxWeight = workout.sets.reduce((max, set) => {
+    const weight = parseFloat(set.weight) || 0;
+    return weight > max ? weight : max;
+  }, 0);
+  
+  // Format the date nicely
+  const formattedDate = format(new Date(workout.date), 'EEE, MMM d, yyyy');
+  
+  return (
+    <View style={styles.workoutHistoryItem}>
+      <View style={styles.workoutHistoryHeader}>
+        <Text style={styles.workoutDate}>{formattedDate}</Text>
+        <View style={styles.workoutMetricsContainer}>
+          <View style={styles.workoutMetric}>
+            <Text style={styles.workoutMetricLabel}>Sets</Text>
+            <Text style={styles.workoutMetricValue}>{workout.sets.length}</Text>
+          </View>
+          <View style={styles.workoutMetric}>
+            <Text style={styles.workoutMetricLabel}>Volume</Text>
+            <Text style={styles.workoutMetricValue}>{totalVolume.toFixed(0)} {workout.weightUnit || weightUnit}</Text>
+          </View>
+          <View style={styles.workoutMetric}>
+            <Text style={styles.workoutMetricLabel}>Max</Text>
+            <Text style={styles.workoutMetricValue}>{maxWeight} {workout.weightUnit || weightUnit}</Text>
+          </View>
+        </View>
+      </View>
+      
+      <View style={styles.setsContainer}>
+        {workout.sets.map((set, setIndex) => {
+          const volume = (parseFloat(set.weight) || 0) * (parseFloat(set.reps) || 0);
+          return (
+            <View key={`set-${setIndex}`} style={styles.setRow}>
+              <View style={styles.setInfo}>
+                <Text style={styles.setText}>Set {setIndex + 1}</Text>
+              </View>
+              <View style={styles.setValues}>
+                <Text style={styles.weightValue}>{set.weight} {workout.weightUnit || weightUnit}</Text>
+                <Text style={styles.multiplySymbol}>×</Text>
+                <Text style={styles.repsValue}>{set.reps} reps</Text>
+                <Text style={styles.volumeValue}>{volume.toFixed(0)}</Text>
+              </View>
+            </View>
+          );
+        })}
+      </View>
+    </View>
+  );
+};
+
 export default function ExerciseHistoryScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
@@ -239,15 +297,37 @@ export default function ExerciseHistoryScreen() {
   }, []);
   
   useEffect(() => {
-    // Check if an exercise was passed as a parameter
-    console.log('Params changed:', params);
-    console.log('Selected exercise param:', params.selectedExercise);
-    
-    if (params.selectedExercise && typeof params.selectedExercise === 'string') {
-      console.log(`Will load exercise: ${params.selectedExercise}`);
-      handleExercisePress(params.selectedExercise);
+    console.log("Params changed:", params);
+    // Check if we received exerciseName from the workout screen
+    if (params.exerciseName) {
+      console.log(`Got exercise name from params: "${params.exerciseName}"`);
+      // Explicitly set the selected exercise to match the parameter
+      const exerciseName = typeof params.exerciseName === 'string' 
+        ? params.exerciseName.trim() 
+        : Array.isArray(params.exerciseName) ? params.exerciseName[0].trim() : '';
+      
+      // Find the exact exercise in the list
+      const exactMatch = exercises.find(ex => ex === exerciseName);
+      if (exactMatch) {
+        console.log(`Found exact match for: ${exerciseName}`);
+        setSelectedExercise(exactMatch);
+        loadExerciseData(exactMatch);
+      } else {
+        console.log(`No exact match found for: ${exerciseName}, searching for similar exercises`);
+        // Try to find a similar exercise name
+        const similarExercise = exercises.find(ex => 
+          ex.toLowerCase().includes(exerciseName.toLowerCase()));
+        
+        if (similarExercise) {
+          console.log(`Found similar exercise: ${similarExercise}`);
+          setSelectedExercise(similarExercise);
+          loadExerciseData(similarExercise);
+        } else {
+          console.log(`No similar exercise found for: ${exerciseName}`);
+        }
+      }
     }
-  }, [params.selectedExercise, exercises]);
+  }, [params.exerciseName, exercises]);
 
   const loadSettings = async () => {
     try {
@@ -283,37 +363,31 @@ export default function ExerciseHistoryScreen() {
   );
 
   const handleExercisePress = async (exerciseName: string) => {
+    console.log(`Loading exercise history for: ${exerciseName}`);
     setSelectedExercise(exerciseName);
     setLoading(true);
     
-    console.log(`Loading exercise history for: ${exerciseName}`);
-    
     try {
-      // Get exercise stats from workouts
+      // First, try to get workout stats
       const workoutStats = await storageService.getExerciseStatsByWorkout(exerciseName, historyDays);
-      console.log(`Found ${workoutStats.length} workout stats:`, JSON.stringify(workoutStats.slice(0, 1)));
-      setWorkoutStats(workoutStats);
+      console.log(`Found ${workoutStats.length} workout stats: ${JSON.stringify(workoutStats).substring(0, 100)}...`);
       
-      // Get best performance (highest volume)
+      // Then, try to get best performance
       const best = await storageService.getBestPerformance(exerciseName, historyDays);
-      console.log('Best performance:', best ? JSON.stringify(best) : 'None found');
+      console.log('Best performance:', best ? JSON.stringify(best).substring(0, 200) : 'None found');
       
-      // Create new exerciseStats object
-      const stats: ExerciseStats = { workouts: workoutStats };
+      // Create exercise stats object
+      const stats: ExerciseStats = { 
+        exerciseName,
+        workouts: workoutStats || [] 
+      };
       
       if (best) {
-        // Ensure weightUnit has a default value
-        const bestWithWeightUnit = {
-          ...best,
-          weightUnit: best.weightUnit || 'kg'
-        };
-        setBestPerformance(bestWithWeightUnit);
-        
         // Add best set to stats
         stats.bestSet = {
           reps: parseFloat(best.reps),
           weight: parseFloat(best.weight),
-          unit: best.weightUnit || 'kg'
+          unit: best.weightUnit || weightUnit
         };
         stats.bestSetDate = best.date;
         
@@ -333,7 +407,7 @@ export default function ExerciseHistoryScreen() {
                 weight: weight,
                 reps: parseFloat(reps),
                 date: workout.date,
-                unit: workout.weightUnit || 'kg'
+                unit: workout.weightUnit || weightUnit
               };
             }
           }
@@ -341,15 +415,23 @@ export default function ExerciseHistoryScreen() {
         stats.personalBests = personalBests;
       }
       
-      console.log('Setting exerciseStats:', JSON.stringify(stats));
+      console.log(`Setting exerciseStats: ${JSON.stringify(stats).substring(0, 1000)}`);
       setExerciseStats(stats);
-      prepareGraphData();
+      setWorkoutStats(workoutStats);
+      setBestPerformance(best);
+      setActiveTab('history'); // Ensure we start with history tab
+      
     } catch (error) {
-      console.error('Error loading exercise stats:', error);
-      Alert.alert('Error', 'Failed to load exercise stats');
+      console.error('Error loading exercise history:', error);
+      // Set empty stats with exercise name
+      setExerciseStats({ 
+        exerciseName,
+        workouts: [] 
+      });
+      setWorkoutStats([]);
+      setBestPerformance(null);
     } finally {
       setLoading(false);
-      setShowStatsModal(true);
     }
   };
 
@@ -506,88 +588,37 @@ export default function ExerciseHistoryScreen() {
     }
   };
 
-  // Render tab content based on active tab
-  const renderTabContent = () => {
-    console.log('Rendering tab content for tab:', activeTab);
-    console.log('exerciseStats:', exerciseStats ? 'Present' : 'Null');
-    
-    if (!selectedExercise) {
-      console.log('No exercise selected');
-      return <Text style={styles.noStatsText}>No exercise selected</Text>;
-    }
-
-    switch (activeTab) {
-      case 'history':
-        return renderHistoryTab();
-      case 'best':
-        return renderBestPerformanceTab();
-      case 'suggested':
-        return renderSuggestedWeightsTab();
-      default:
-        return renderHistoryTab();
-    }
-  };
-
-  // Render workout history tab content
-  const renderHistoryTab = () => {
-    console.log('Rendering history tab, exerciseStats:', 
-      exerciseStats ? 
-      `Present with ${exerciseStats.workouts?.length || 0} workouts` : 
-      'Null');
-    
+  // Replace the renderHistoryTabContent function
+  const renderHistoryTabContent = () => {
     if (!exerciseStats || !exerciseStats.workouts || exerciseStats.workouts.length === 0) {
-      console.log('No workout history found');
       return (
-        <View style={styles.emptyTabContainer}>
-          <Icon name="time-outline" size={80} color={COLORS.primaryLight} />
-          <Text style={styles.emptyListText}>No workout history found</Text>
-          <Text style={styles.emptyListSubtext}>Complete workouts with this exercise to see your history</Text>
+        <View style={styles.noDataContainer}>
+          <Ionicons name="fitness-outline" size={50} color={COLORS.border} />
+          <Text style={styles.historyNoDataText}>
+            No workout history for {selectedExercise}
+          </Text>
+          <Text style={styles.noDataSubtext}>
+            Complete workouts with this exercise to build your history.
+          </Text>
         </View>
       );
     }
 
-    console.log(`Rendering ${exerciseStats.workouts.length} workouts in history tab`);
     return (
-      <ScrollView 
-        style={{ flex: 1 }} 
-        contentContainerStyle={styles.scrollContent}
-      >
-        {exerciseStats.workouts.map((workout, workoutIndex) => (
-          <View key={`workout-${workoutIndex}`} style={styles.workoutContainer}>
-            <View style={styles.workoutHeader}>
-              <Text style={styles.workoutDate}>
-                {format(new Date(workout.date), 'MMMM d, yyyy')}
-              </Text>
-            </View>
-            
-            <View style={styles.bestPerformanceTableHeader}>
-              <Text style={styles.bestPerformanceHeaderCell}>Set</Text>
-              <Text style={styles.bestPerformanceHeaderCell}>Reps</Text>
-              <Text style={styles.bestPerformanceHeaderCell}>Weight</Text>
-            </View>
-            
-            {workout.sets.map((set, setIndex) => (
-              <View key={`set-${setIndex}`} style={styles.bestPerformanceRow}>
-                <Text style={styles.bestPerformanceCell}>{setIndex + 1}</Text>
-                <Text style={styles.bestPerformanceCell}>{set.reps}</Text>
-                <Text style={styles.bestPerformanceCell}>{set.weight}{workout.weightUnit || 'kg'}</Text>
-              </View>
-            ))}
-          </View>
+      <View style={styles.historyListContainer}>
+        {exerciseStats.workouts.map((workout, index) => (
+          <WorkoutHistoryItem
+            key={workout.id || `workout-${index}`}
+            workout={workout}
+            index={index}
+            weightUnit={weightUnit}
+          />
         ))}
-        
-        <TouchableOpacity 
-          style={styles.graphsButton}
-          onPress={() => setShowGraphsModal(true)}
-        >
-          <Icon name="analytics-outline" size={20} color={COLORS.card} style={styles.tabIcon} />
-          <Text style={styles.graphsButtonText}>View Performance Graphs</Text>
-        </TouchableOpacity>
-      </ScrollView>
+      </View>
     );
   };
 
-  // Render best performance tab content
+  // Render workout history tab content
   const renderBestPerformanceTab = () => {
     if (!selectedExercise || !exerciseStats) {
       return (
@@ -723,7 +754,7 @@ export default function ExerciseHistoryScreen() {
           <Text style={styles.oneRepMaxTitle}>Estimated 1-Rep Max</Text>
           <Text style={styles.oneRepMaxValue}>{oneRepMax.toFixed(1)}{weightUnit}</Text>
           <Text style={styles.oneRepMaxDescription}>
-            Based on your best performance using the Brzycki formula
+            Based on your estimated 1-rep max of {oneRepMax.toFixed(1)}{weightUnit}
           </Text>
         </View>
 
@@ -773,10 +804,104 @@ export default function ExerciseHistoryScreen() {
     );
   };
 
+  // Add the renderTabContent function that was missing
+  const renderTabContent = () => {
+    console.log('Rendering tab content for tab:', activeTab);
+    
+    if (!selectedExercise) {
+      console.log('No exercise selected');
+      return <Text style={styles.noStatsText}>No exercise selected</Text>;
+    }
+
+    switch (activeTab) {
+      case 'history':
+        return renderHistoryTabContent();
+      case 'best':
+        return renderBestPerformanceTab();
+      case 'suggested':
+        return renderSuggestedWeightsTab();
+      default:
+        return renderHistoryTabContent();
+    }
+  };
+
   // Function to handle going back
   const handleBack = () => {
     router.back();
   };
+
+  // Define the loadExerciseData function
+  const loadExerciseData = useCallback(async (exerciseName: string) => {
+    if (!exerciseName) return;
+    
+    console.log(`Loading history for: ${exerciseName}`);
+    setLoading(true);
+    
+    try {
+      // First, try to get workout stats
+      const workoutStats = await storageService.getExerciseStatsByWorkout(exerciseName, historyDays);
+      console.log(`Found ${workoutStats.length} workout stats for ${exerciseName}`);
+      
+      // Then, try to get best performance
+      const best = await storageService.getBestPerformance(exerciseName, historyDays);
+      console.log('Best performance:', best ? best.weight : 'None found');
+      
+      // Create exercise stats object
+      const stats: ExerciseStats = { 
+        exerciseName,
+        workouts: workoutStats || [] 
+      };
+      
+      if (best) {
+        // Add best set to stats
+        stats.bestSet = {
+          reps: parseFloat(best.reps),
+          weight: parseFloat(best.weight),
+          unit: best.weightUnit || weightUnit
+        };
+        stats.bestSetDate = best.date;
+        
+        // Calculate estimated 1RM
+        const oneRepMax = calculateOneRepMax(parseFloat(best.weight), parseFloat(best.reps));
+        stats.estimatedOneRepMax = oneRepMax;
+        console.log(`Calculated 1RM: ${oneRepMax} ${weightUnit}`);
+        
+        // Process personal bests by rep ranges
+        const personalBests: { [key: string]: PersonalBest } = {};
+        for (const workout of workoutStats) {
+          for (const set of workout.sets) {
+            const reps = set.reps;
+            const weight = parseFloat(set.weight);
+            
+            if (!personalBests[reps] || weight > personalBests[reps].weight) {
+              personalBests[reps] = {
+                weight: weight,
+                reps: parseFloat(reps),
+                date: workout.date,
+                unit: workout.weightUnit || weightUnit
+              };
+            }
+          }
+        }
+        stats.personalBests = personalBests;
+      }
+      
+      setExerciseStats(stats);
+      setWorkoutStats(workoutStats);
+      setBestPerformance(best);
+      setActiveTab('history'); // Make sure we show history tab
+      
+    } catch (error) {
+      console.error('Error loading exercise data:', error);
+      // Set empty stats with exercise name
+      setExerciseStats({ 
+        exerciseName,
+        workouts: [] 
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [historyDays, weightUnit]);
 
   return (
     <View style={styles.container}>
@@ -1533,5 +1658,93 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 16,
     boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+  },
+  workoutHistoryItem: {
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 10,
+    overflow: 'hidden',
+    backgroundColor: COLORS.card,
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  workoutHistoryHeader: {
+    backgroundColor: COLORS.primaryLight,
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  workoutMetricsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  workoutMetric: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  workoutMetricLabel: {
+    fontWeight: 'bold',
+    marginRight: 5,
+  },
+  workoutMetricValue: {
+    fontWeight: 'bold',
+  },
+  setsContainer: {
+    padding: 12,
+  },
+  setRow: {
+    flexDirection: 'row',
+    paddingVertical: 5,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  setInfo: {
+    flex: 1,
+  },
+  setText: {
+    fontWeight: 'bold',
+  },
+  setValues: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  weightValue: {
+    flex: 1,
+  },
+  multiplySymbol: {
+    marginHorizontal: 5,
+  },
+  repsValue: {
+    flex: 1,
+  },
+  volumeValue: {
+    flex: 1,
+  },
+  noDataContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+  },
+  historyNoDataText: {
+    textAlign: 'center',
+    marginTop: 20,
+    color: COLORS.textSecondary,
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  noDataSubtext: {
+    textAlign: 'center',
+    marginTop: 10,
+    color: COLORS.textSecondary,
+    fontSize: 14,
+  },
+  historyListContainer: {
+    padding: 20,
   },
 }); 
