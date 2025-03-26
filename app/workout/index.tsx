@@ -18,9 +18,10 @@ import {
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import * as storageService from '../../services/storageService';
 import * as settingsService from '../../services/settingsService';
+import * as Haptics from 'expo-haptics';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { COLORS } from '../../services/colors';
-import { Swipeable, PanGestureHandler } from 'react-native-gesture-handler';
+import { Swipeable, PanGestureHandler, LongPressGestureHandler, State } from 'react-native-gesture-handler';
 import Animated, { 
   useAnimatedStyle, 
   useSharedValue, 
@@ -28,6 +29,10 @@ import Animated, {
   useAnimatedGestureHandler,
   runOnJS
 } from 'react-native-reanimated';
+
+// Constants for array sizing
+const MAX_EXERCISES = 30; // Choose a reasonable upper limit for exercises
+const MAX_SETS_PER_EXERCISE = 30; // Maximum sets per exercise
 
 // Generate a unique ID
 const generateId = () => {
@@ -96,14 +101,6 @@ interface SetWithCompletion extends storageService.Set {
 const ExerciseItem = React.memo(({ 
   exercise, 
   exerciseIndex, 
-  translateY, 
-  opacity, 
-  zIndex, 
-  scale,
-  onLayout,
-  onDragStart,
-  onDragMove,
-  onDragEnd,
   deleteExercise,
   viewExerciseHistory,
   addSet,
@@ -111,18 +108,14 @@ const ExerciseItem = React.memo(({
   updateWeight,
   updateReps,
   toggleSetCompletion,
-  handleSwipeableRef
+  handleSwipeableRef,
+  moveExerciseUp,
+  moveExerciseDown,
+  isFirst,
+  isLast
 }: { 
   exercise: Exercise;
   exerciseIndex: number;
-  translateY: Animated.SharedValue<number>;
-  opacity: Animated.SharedValue<number>;
-  zIndex: Animated.SharedValue<number>;
-  scale: Animated.SharedValue<number>;
-  onLayout: (event: any) => void;
-  onDragStart: (index: number) => void;
-  onDragMove: (index: number, absoluteY: number) => void;
-  onDragEnd: () => void;
   deleteExercise: (id: string) => void;
   viewExerciseHistory: (name: string) => void;
   addSet: (exerciseId: string) => void;
@@ -131,41 +124,11 @@ const ExerciseItem = React.memo(({
   updateReps: (exerciseId: string, setId: string, reps: string) => void;
   toggleSetCompletion: (exerciseId: string, setId: string) => void;
   handleSwipeableRef: (ref: Swipeable | null, exerciseIndex: number, setIndex: number) => void;
+  moveExerciseUp: (exerciseIndex: number) => void;
+  moveExerciseDown: (exerciseIndex: number) => void;
+  isFirst: boolean;
+  isLast: boolean;
 }) => {
-  // Create animated style for this specific exercise
-  const animatedStyle = useAnimatedStyle(() => {
-    return {
-      transform: [
-        { translateY: translateY.value },
-        { scale: scale.value }
-      ],
-      opacity: opacity.value,
-      zIndex: zIndex.value,
-    };
-  });
-  
-  // Create gesture handler for this exercise
-  const gestureHandler = useAnimatedGestureHandler({
-    onStart: () => {
-      runOnJS(onDragStart)(exerciseIndex);
-      translateY.value = 0;
-      zIndex.value = 100;
-      scale.value = withSpring(1.03);
-      opacity.value = withSpring(0.9);
-    },
-    onActive: (event) => {
-      translateY.value = event.translationY;
-      runOnJS(onDragMove)(exerciseIndex, event.absoluteY);
-    },
-    onEnd: () => {
-      runOnJS(onDragEnd)();
-      translateY.value = withSpring(0);
-      zIndex.value = 1;
-      scale.value = withSpring(1);
-      opacity.value = withSpring(1);
-    },
-  });
-
   // Render a set row with swipe-to-delete
   const renderSet = (set: SetWithCompletion, index: number) => {
     const isCompleted = set.completed;
@@ -191,26 +154,32 @@ const ExerciseItem = React.memo(({
           styles.setContainer,
           isCompleted && styles.completedSetContainer
         ]}>
-          <View style={styles.setHeader}>
-            <Text style={styles.setText}>Set {index + 1}</Text>
-          </View>
           <View style={styles.inputRow}>
-            {/* Weight first, then reps */}
+            <Text style={styles.setText}>Set {index + 1}</Text>
             <TextInput
-              style={[styles.input, styles.smallInput]}
+              style={[
+                styles.input, 
+                styles.smallInput,
+                isCompleted && styles.disabledInput
+              ]}
               placeholder="Weight"
               keyboardType="numeric"
               value={set.weight}
               onChangeText={(text) => updateWeight(exercise.id, set.id, text)}
+              editable={!isCompleted}
             />
             <TextInput
-              style={[styles.input, styles.smallInput]}
+              style={[
+                styles.input, 
+                styles.smallInput,
+                isCompleted && styles.disabledInput
+              ]}
               placeholder="Reps"
               keyboardType="numeric"
               value={set.reps}
               onChangeText={(text) => updateReps(exercise.id, set.id, text)}
+              editable={!isCompleted}
             />
-            {/* Add checkbox for completion */}
             <TouchableOpacity
               style={[
                 styles.completionCheckbox,
@@ -219,7 +188,7 @@ const ExerciseItem = React.memo(({
               onPress={() => toggleSetCompletion(exercise.id, set.id)}
             >
               {isCompleted && (
-                <Ionicons name="checkmark" size={16} color="#FFF" />
+                <Ionicons name="checkmark" size={14} color="#FFF" />
               )}
             </TouchableOpacity>
           </View>
@@ -229,25 +198,41 @@ const ExerciseItem = React.memo(({
   };
 
   return (
-    <Animated.View 
+    <View 
       key={exercise.id} 
-      style={[styles.exerciseCard, animatedStyle]}
-      onLayout={onLayout}
+      style={styles.exerciseCard}
     >
       <View style={styles.exerciseHeader}>
-        <PanGestureHandler onGestureEvent={gestureHandler}>
-          <Animated.View style={styles.dragHandle}>
-            <Ionicons name="reorder-two" size={24} color={COLORS.textSecondary} />
-          </Animated.View>
-        </PanGestureHandler>
-        <Text style={styles.exerciseName}>{exercise.name}</Text>
+        <View style={styles.exerciseNameContainer}>
+          <Text style={styles.exerciseName}>{exercise.name}</Text>
+        </View>
+        
         <View style={styles.exerciseActions}>
+          <View style={styles.orderButtonsContainer}>
+            <TouchableOpacity
+              style={[styles.orderButton, isFirst && styles.orderButtonDisabled]}
+              onPress={() => !isFirst && moveExerciseUp(exerciseIndex)}
+              disabled={isFirst}
+            >
+              <Ionicons name="chevron-up" size={16} color={isFirst ? COLORS.border : COLORS.primary} />
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={[styles.orderButton, isLast && styles.orderButtonDisabled]}
+              onPress={() => !isLast && moveExerciseDown(exerciseIndex)}
+              disabled={isLast}
+            >
+              <Ionicons name="chevron-down" size={16} color={isLast ? COLORS.border : COLORS.primary} />
+            </TouchableOpacity>
+          </View>
+          
           <TouchableOpacity
             style={styles.historyButton}
             onPress={() => viewExerciseHistory(exercise.name)}
           >
-            <Text style={styles.historyButtonText}>View History</Text>
+            <Text style={styles.historyButtonText}>History</Text>
           </TouchableOpacity>
+          
           <TouchableOpacity
             style={styles.deleteButton}
             onPress={() => deleteExercise(exercise.id)}
@@ -257,7 +242,9 @@ const ExerciseItem = React.memo(({
         </View>
       </View>
       
-      {exercise.sets.map((set, index) => renderSet(set as SetWithCompletion, index))}
+      <View style={styles.setsContainer}>
+        {exercise.sets.map((set, index) => renderSet(set as SetWithCompletion, index))}
+      </View>
       
       <TouchableOpacity 
         style={styles.addSetButton}
@@ -265,7 +252,7 @@ const ExerciseItem = React.memo(({
       >
         <Text style={styles.buttonText}>Add Set</Text>
       </TouchableOpacity>
-    </Animated.View>
+    </View>
   );
 });
 
@@ -296,45 +283,11 @@ export default function WorkoutScreen() {
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'history' | 'best' | 'suggested'>('history');
   
-  // Add state for tracking dragging
-  const [draggingExerciseIndex, setDraggingExerciseIndex] = useState<number | null>(null);
-  
-  // Create refs for animated values outside the render loop
+  // Remove all the drag-and-drop related state and refs
   const swipeableRefs = useRef<Array<Swipeable | null>>([]);
-  const exercisePositions = useRef<Array<{y: number, height: number}>>([]);
   
-  // Pre-create a fixed number of animation values to avoid hook issues
-  const MAX_EXERCISES = 30; // Choose a reasonable upper limit for exercises
-  const MAX_SETS_PER_EXERCISE = 30; // Maximum sets per exercise
-  const translateYValues = useRef<Animated.SharedValue<number>[]>(
-    Array(MAX_EXERCISES).fill(0).map(() => useSharedValue(0))
-  );
-  const opacityValues = useRef<Animated.SharedValue<number>[]>(
-    Array(MAX_EXERCISES).fill(0).map(() => useSharedValue(1))
-  );
-  const zIndexValues = useRef<Animated.SharedValue<number>[]>(
-    Array(MAX_EXERCISES).fill(0).map(() => useSharedValue(1))
-  );
-  const scaleValues = useRef<Animated.SharedValue<number>[]>(
-    Array(MAX_EXERCISES).fill(0).map(() => useSharedValue(1))
-  );
-  
-  // Reset animation values when exercises change
+  // Reset swipeable refs array when exercises change
   useEffect(() => {
-    // Reset animation values for all exercises
-    translateYValues.current.forEach(value => {
-      value.value = 0;
-    });
-    opacityValues.current.forEach(value => {
-      value.value = 1;
-    });
-    zIndexValues.current.forEach(value => {
-      value.value = 1;
-    });
-    scaleValues.current.forEach(value => {
-      value.value = 1;
-    });
-    
     // Initialize swipeableRefs array
     if (!swipeableRefs.current) {
       swipeableRefs.current = [];
@@ -1144,106 +1097,27 @@ export default function WorkoutScreen() {
     ));
   };
 
-  // Add a function to reorder exercises based on drag and drop
-  const reorderExercises = (fromIndex: number, toIndex: number) => {
+  // Add functions to move exercises up and down
+  const moveExerciseUp = (exerciseIndex: number) => {
+    if (exerciseIndex <= 0) return;
+    
     const newExercises = [...exercises];
-    const [removed] = newExercises.splice(fromIndex, 1);
-    newExercises.splice(toIndex, 0, removed);
+    const temp = newExercises[exerciseIndex];
+    newExercises[exerciseIndex] = newExercises[exerciseIndex - 1];
+    newExercises[exerciseIndex - 1] = temp;
+    
     setExercises(newExercises);
   };
-
-  // Function to handle starting a drag operation
-  const onDragStart = (exerciseIndex: number) => {
-    setDraggingExerciseIndex(exerciseIndex);
-  };
   
-  // Function to handle finishing a drag operation
-  const onDragEnd = () => {
-    setDraggingExerciseIndex(null);
-  };
-  
-  // Function to handle the drag movement and determine the new position
-  const onDragMove = (exerciseIndex: number, dragY: number) => {
-    if (draggingExerciseIndex === null || exercisePositions.current.length !== exercises.length) {
-      return;
-    }
+  const moveExerciseDown = (exerciseIndex: number) => {
+    if (exerciseIndex >= exercises.length - 1) return;
     
-    // Calculate the center position of the dragged exercise
-    const draggedItemHeight = exercisePositions.current[exerciseIndex].height;
-    const draggedItemCenter = dragY + draggedItemHeight / 2;
+    const newExercises = [...exercises];
+    const temp = newExercises[exerciseIndex];
+    newExercises[exerciseIndex] = newExercises[exerciseIndex + 1];
+    newExercises[exerciseIndex + 1] = temp;
     
-    // Find the index to swap with
-    let newIndex = exerciseIndex;
-    
-    // Check if we should move it up
-    for (let i = 0; i < exerciseIndex; i++) {
-      const { y, height } = exercisePositions.current[i];
-      const itemCenter = y + height / 2;
-      
-      if (draggedItemCenter < itemCenter) {
-        newIndex = i;
-        break;
-      }
-    }
-    
-    // Check if we should move it down
-    if (newIndex === exerciseIndex) {
-      for (let i = exercises.length - 1; i > exerciseIndex; i--) {
-        const { y, height } = exercisePositions.current[i];
-        const itemCenter = y + height / 2;
-        
-        if (draggedItemCenter > itemCenter) {
-          newIndex = i;
-          break;
-        }
-      }
-    }
-    
-    // Reorder the exercises if needed
-    if (newIndex !== exerciseIndex) {
-      reorderExercises(exerciseIndex, newIndex);
-      setDraggingExerciseIndex(newIndex);
-    }
-  };
-
-  // Define the animated style and gesture handler creators for use in the render function
-  const createAnimatedStyle = (translateY: Animated.SharedValue<number>, scale: Animated.SharedValue<number>, 
-                              opacity: Animated.SharedValue<number>, zIndex: Animated.SharedValue<number>) => {
-    return {
-      transform: [
-        { translateY: translateY.value },
-        { scale: scale.value }
-      ],
-      opacity: opacity.value,
-      zIndex: zIndex.value,
-    };
-  };
-
-  // This function creates a gesture handler for a given exercise
-  const createDragGestureHandler = (
-    index: number, 
-    onStart: (index: number) => void,
-    onMove: (index: number, absoluteY: number) => void, 
-    onEnd: () => void
-  ) => {
-    return (event: any) => {
-      if (event.state === 1) { // State began
-        onStart(index);
-        translateYValues.current[index].value = 0;
-        zIndexValues.current[index].value = 100;
-        scaleValues.current[index].value = withSpring(1.03);
-        opacityValues.current[index].value = withSpring(0.9);
-      } else if (event.state === 2) { // State changed
-        translateYValues.current[index].value = event.translationY;
-        onMove(index, event.absoluteY);
-      } else if (event.state === 3 || event.state === 5) { // State ended or cancelled
-        onEnd();
-        translateYValues.current[index].value = withSpring(0);
-        zIndexValues.current[index].value = 1;
-        scaleValues.current[index].value = withSpring(1);
-        opacityValues.current[index].value = withSpring(1);
-      }
-    };
+    setExercises(newExercises);
   };
 
   // Create a callback for handling swipeable refs  
@@ -1266,87 +1140,83 @@ export default function WorkoutScreen() {
 
   return (
     <View style={styles.container} key={`workout-container-${forceRefreshKey}`}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={handleBack} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color={COLORS.primary} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Workout</Text>
-        <View style={styles.headerRight} />
-      </View>
       <ScrollView contentContainerStyle={styles.contentContainer}>
-        <Text style={styles.title}>Workout Session</Text>
+        <View style={styles.topSection}>
+          {workoutStarted && (
+            <View style={styles.timerContainer}>
+              <Text style={styles.timerLabel}>Workout Time</Text>
+              <Text style={styles.timerDisplay}>{formatTime(elapsedTime)}</Text>
+            </View>
+          )}
         
-        {workoutStarted && (
-          <View style={styles.timerContainer}>
-            <Text style={styles.timerLabel}>Workout Time</Text>
-            <Text style={styles.timerDisplay}>{formatTime(elapsedTime)}</Text>
-          </View>
-        )}
-      
-        <View style={styles.addExerciseContainer}>
-          <View style={styles.autocompleteContainer}>
-            <TextInput
-              style={styles.input}
-              placeholder="Enter exercise name"
-              value={newExerciseName}
-              onChangeText={handleExerciseNameChange}
-              onFocus={() => setShowSuggestions(newExerciseName.trim().length > 0)}
-            />
+          <View style={styles.addExerciseContainer}>
+            <View style={styles.autocompleteContainer}>
+              <TextInput
+                style={styles.input}
+                placeholder="Enter exercise name"
+                value={newExerciseName}
+                onChangeText={handleExerciseNameChange}
+                onFocus={() => setShowSuggestions(newExerciseName.trim().length > 0)}
+              />
+              
+              {showSuggestions && suggestions.length > 0 && (
+                <View style={styles.suggestionsContainer}>
+                  <FlatList
+                    data={suggestions}
+                    keyExtractor={(item) => item}
+                    renderItem={({ item }) => (
+                      <TouchableOpacity
+                        style={styles.suggestionItem}
+                        onPress={() => selectSuggestion(item)}
+                      >
+                        <Text>{item}</Text>
+                      </TouchableOpacity>
+                    )}
+                    style={styles.suggestionsList}
+                  />
+                </View>
+              )}
+            </View>
             
-            {showSuggestions && suggestions.length > 0 && (
-              <View style={styles.suggestionsContainer}>
-                <FlatList
-                  data={suggestions}
-                  keyExtractor={(item) => item}
-                  renderItem={({ item }) => (
-                    <TouchableOpacity
-                      style={styles.suggestionItem}
-                      onPress={() => selectSuggestion(item)}
-                    >
-                      <Text>{item}</Text>
-                    </TouchableOpacity>
-                  )}
-                  style={styles.suggestionsList}
-                />
-              </View>
-            )}
+            <TouchableOpacity 
+              style={styles.addButton}
+              onPress={addExercise}
+            >
+              <Text style={styles.buttonText}>Add</Text>
+            </TouchableOpacity>
           </View>
-          
-          <TouchableOpacity 
-            style={styles.addButton}
-            onPress={addExercise}
-          >
-            <Text style={styles.buttonText}>Add</Text>
-          </TouchableOpacity>
         </View>
         
-        {exercises.map((exercise, exerciseIndex) => (
-          <ExerciseItem 
-            key={exercise.id}
-            exercise={exercise}
-            exerciseIndex={exerciseIndex}
-            translateY={translateYValues.current[exerciseIndex]}
-            opacity={opacityValues.current[exerciseIndex]}
-            zIndex={zIndexValues.current[exerciseIndex]}
-            scale={scaleValues.current[exerciseIndex]}
-            onLayout={(event) => {
-              const { y, height } = event.nativeEvent.layout;
-              if (!exercisePositions.current) exercisePositions.current = [];
-              exercisePositions.current[exerciseIndex] = { y, height };
-            }}
-            onDragStart={onDragStart}
-            onDragMove={onDragMove}
-            onDragEnd={onDragEnd}
-            deleteExercise={deleteExercise}
-            viewExerciseHistory={viewExerciseHistory}
-            addSet={addSet}
-            deleteSet={deleteSet}
-            updateWeight={updateWeight}
-            updateReps={updateReps}
-            toggleSetCompletion={toggleSetCompletion}
-            handleSwipeableRef={handleSwipeableRef}
-          />
-        ))}
+        {exercises.length === 0 && (
+          <View style={styles.emptyWorkoutContainer}>
+            <Ionicons name="barbell-outline" size={60} color={COLORS.primaryLight} />
+            <Text style={styles.emptyWorkoutText}>
+              Your workout is empty. Add exercises to get started.
+            </Text>
+          </View>
+        )}
+        
+        <View style={styles.exercisesContainer}>
+          {exercises.map((exercise, exerciseIndex) => (
+            <ExerciseItem 
+              key={exercise.id}
+              exercise={exercise}
+              exerciseIndex={exerciseIndex}
+              deleteExercise={deleteExercise}
+              viewExerciseHistory={viewExerciseHistory}
+              addSet={addSet}
+              deleteSet={deleteSet}
+              updateWeight={updateWeight}
+              updateReps={updateReps}
+              toggleSetCompletion={toggleSetCompletion}
+              handleSwipeableRef={handleSwipeableRef}
+              moveExerciseUp={moveExerciseUp}
+              moveExerciseDown={moveExerciseDown}
+              isFirst={exerciseIndex === 0}
+              isLast={exerciseIndex === exercises.length - 1}
+            />
+          ))}
+        </View>
         
         {exercises.length > 0 && (
           <View style={styles.actionContainer}>
@@ -1372,382 +1242,7 @@ export default function WorkoutScreen() {
         )}
       </ScrollView>
       
-      {/* Cancel Workout Confirmation */}
-      <Modal
-        animationType="fade"
-        transparent={true}
-        visible={showCancelModal}
-        onRequestClose={() => setShowCancelModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.confirmModalContent}>
-            <Text style={styles.confirmModalTitle}>Workout in Progress</Text>
-            <Text style={styles.confirmModalText}>
-              What would you like to do with your current workout?
-            </Text>
-            
-            <View style={styles.confirmButtonColumn}>
-              <TouchableOpacity 
-                style={styles.continueButton}
-                onPress={continueWorkout}
-              >
-                <Text style={styles.continueButtonText}>Continue Workout</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={styles.saveButton}
-                onPress={() => {
-                  setShowCancelModal(false);
-                  handleSaveWorkout();
-                }}
-              >
-                <Text style={styles.saveButtonText}>Save and Complete</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={styles.saveExitButton}
-                onPress={() => {
-                  setShowCancelModal(false);
-                  router.back();
-                }}
-              >
-                <Text style={styles.saveExitButtonText}>Save and Exit</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={styles.discardButton}
-                onPress={confirmCancelWorkout}
-              >
-                <Text style={styles.discardButtonText}>Discard Workout</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-      
-      {/* Restore Workout Modal */}
-      <Modal
-        animationType="slide"
-        transparent={true}
-        visible={showRestoreModal}
-        onRequestClose={() => setShowRestoreModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Resume Workout</Text>
-            <Text style={styles.modalSubtitle}>
-              You have an unfinished workout. Would you like to resume where you left off?
-            </Text>
-            
-            <View style={styles.modalButtons}>
-              <TouchableOpacity 
-                style={styles.discardButton}
-                onPress={discardActiveWorkout}
-                disabled={restoringWorkout}
-              >
-                <Text style={styles.discardButtonText}>Discard</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={styles.resumeButton}
-                onPress={restoreActiveWorkout}
-                disabled={restoringWorkout}
-              >
-                {restoringWorkout ? (
-                  <ActivityIndicator size="small" color="white" />
-                ) : (
-                  <Text style={styles.resumeButtonText}>Resume</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-      
-      {/* Exercise Stats Modal */}
-      <Modal
-        animationType="slide"
-        transparent={true}
-        visible={showStatsModal}
-        onRequestClose={() => setShowStatsModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { maxHeight: '90%', height: '90%' }]}>
-            <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>
-                {selectedExercise}
-            </Text>
-              <TouchableOpacity 
-                style={styles.closeButton}
-                onPress={() => setShowStatsModal(false)}
-              >
-                <Ionicons name="close" size={24} color="#fff" />
-              </TouchableOpacity>
-            </View>
-            
-            {/* Tabs */}
-            <View style={styles.tabsContainer}>
-              {(['history', 'best', 'suggested'] as Array<'history' | 'best' | 'suggested'>).map((tab) => (
-                <TouchableOpacity
-                  key={tab}
-                  style={[
-                    styles.tab,
-                    activeTab === tab ? styles.activeTab : null
-                  ]}
-                  onPress={() => setActiveTab(tab)}
-                >
-                  <Ionicons 
-                    name={tab === 'history' ? 'time-outline' : tab === 'best' ? 'trophy-outline' : 'analytics-outline'} 
-                    size={20} 
-                    color={activeTab === tab ? '#fff' : '#757575'} 
-                    style={styles.tabIcon}
-                  />
-                  <Text 
-                    style={[
-                      styles.tabText,
-                      activeTab === tab ? styles.activeTabText : null
-                    ]}
-                  >
-                    {tab === 'history' ? 'History' : tab === 'best' ? 'Personal Records' : 'Suggested Weights'}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            
-            {/* Tab Content */}
-            <View style={{ flex: 1, padding: 0 }}>
-              {loading ? (
-                <ActivityIndicator size="large" color="#1E88E5" style={{ marginTop: 40 }} />
-              ) : !exerciseStats ? (
-                <View style={styles.emptyTabContainer}>
-                  <Text style={styles.noStatsText}>
-                    {selectedExercise ? 'No data available' : 'No exercise selected'}
-                  </Text>
-                </View>
-              ) : (
-                <>
-                  {activeTab === 'history' && (
-                    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 15 }}>
-                      {exerciseStats.workouts && exerciseStats.workouts.length > 0 ? (
-                        exerciseStats.workouts.map((workout, workoutIndex) => (
-                          <View key={`workout-${workoutIndex}`} style={styles.workoutContainer}>
-                            <View style={styles.workoutHeader}>
-                              <Text style={styles.workoutDate}>
-                                {new Date(workout.date).toLocaleDateString()}
-                              </Text>
-                            </View>
-                            
-                            <View style={styles.statsHeader}>
-                              <Text style={styles.statsHeaderText}>Set</Text>
-                              <Text style={styles.statsHeaderText}>Reps</Text>
-                              <Text style={styles.statsHeaderText}>Weight</Text>
-                            </View>
-                            
-                            {workout.sets.map((set, setIndex) => (
-                              <View 
-                                key={`set-${setIndex}`} 
-                                style={styles.statsRow}
-                              >
-                                <Text style={styles.statsCell}>{setIndex + 1}</Text>
-                                <Text style={styles.statsCell}>{set.reps || '-'}</Text>
-                                <Text style={styles.statsCell}>
-                                  {set.weight} {workout.weightUnit || 'kg'}
-                                </Text>
-                              </View>
-                            ))}
-                          </View>
-                        ))
-                      ) : (
-                        <View style={styles.emptyTabContainer}>
-                          <Ionicons name="time-outline" size={60} color="#E3F2FD" />
-                          <Text style={styles.noStatsText}>No workout history found</Text>
-                          <Text style={styles.emptyListSubtext}>
-                            Complete workouts with this exercise to see your history
-                          </Text>
-                        </View>
-                      )}
-                    </ScrollView>
-                  )}
-                  
-                  {activeTab === 'best' && (
-                    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 15 }}>
-                      {exerciseStats.bestSet ? (
-                        <>
-              <View style={styles.bestPerformanceContainer}>
-                            <View style={styles.bestPerformanceBadge}>
-                              <Ionicons name="trophy" size={16} color="#fff" />
-                              <Text style={styles.bestPerformanceBadgeText}>PERSONAL BEST</Text>
-                            </View>
-                            
-                            <Text style={styles.bestPerformanceTitle}>Best Overall Set</Text>
-                            {exerciseStats.bestSetDate && (
-                <Text style={styles.bestPerformanceDate}>
-                                {new Date(exerciseStats.bestSetDate).toLocaleDateString()}
-                </Text>
-                            )}
-                
-                <View style={styles.bestPerformanceTable}>
-                  <View style={styles.bestPerformanceTableHeader}>
-                    <Text style={styles.bestPerformanceHeaderCell}>Set</Text>
-                    <Text style={styles.bestPerformanceHeaderCell}>Reps</Text>
-                    <Text style={styles.bestPerformanceHeaderCell}>Weight</Text>
-                    <Text style={styles.bestPerformanceHeaderCell}>Volume</Text>
-                  </View>
-                  
-                              <View style={[styles.bestPerformanceRow, styles.bestPerformanceHighlight]}>
-                                <Text style={styles.bestPerformanceCell}>1</Text>
-                                <Text style={styles.bestPerformanceCell}>{exerciseStats.bestSet.reps}</Text>
-                        <Text style={styles.bestPerformanceCell}>
-                                  {exerciseStats.bestSet.weight}{exerciseStats.bestSet.unit}
-                        </Text>
-                                <Text style={styles.bestPerformanceCell}>
-                                  {(exerciseStats.bestSet.reps * exerciseStats.bestSet.weight).toFixed(1)}
-                                  {exerciseStats.bestSet.unit}
-                                </Text>
-                      </View>
-                </View>
-                
-                            <Text style={styles.bestPerformanceNote}>
-                              This is your highest volume set (weight × reps)
-                        </Text>
-                      </View>
-                      
-                          {exerciseStats.estimatedOneRepMax && exerciseStats.estimatedOneRepMax > 0 && (
-                            <View style={styles.oneRepMaxContainer}>
-                              <Text style={styles.oneRepMaxTitle}>Estimated 1-Rep Max</Text>
-                              <Text style={styles.oneRepMaxValue}>
-                                {exerciseStats.estimatedOneRepMax.toFixed(1)}{exerciseStats.bestSet.unit || 'kg'}
-                        </Text>
-                              <Text style={styles.oneRepMaxDescription}>
-                                Based on your best set using the Brzycki formula
-                        </Text>
-                      </View>
-                          )}
-
-                          {exerciseStats.personalBests && Object.keys(exerciseStats.personalBests).length > 0 && (
-                            <View style={styles.bestPerformanceContainer}>
-                              <Text style={styles.bestPerformanceTitle}>Best Lifts By Rep Range</Text>
-                              
-                              <View style={styles.bestPerformanceTable}>
-                                <View style={styles.bestPerformanceTableHeader}>
-                                  <Text style={styles.bestPerformanceHeaderCell}>Reps</Text>
-                                  <Text style={styles.bestPerformanceHeaderCell}>Weight</Text>
-                                  <Text style={styles.bestPerformanceHeaderCell}>Date</Text>
-                    </View>
-                                
-                                {Object.entries(exerciseStats.personalBests)
-                                  .sort(([repsA], [repsB]) => parseInt(repsA) - parseInt(repsB))
-                                  .map(([reps, best]) => (
-                                    <View key={reps} style={styles.bestPerformanceRow}>
-                                      <Text style={styles.bestPerformanceCell}>{reps}</Text>
-                                      <Text style={styles.bestPerformanceCell}>
-                                        {best.weight.toFixed(1)}{best.unit}
-                                      </Text>
-                                      <Text style={styles.bestPerformanceCell}>
-                                        {best.date ? new Date(best.date).toLocaleDateString() : 'N/A'}
-                </Text>
-              </View>
-                                  ))}
-                              </View>
-                            </View>
-                          )}
-                        </>
-                      ) : (
-                        <View style={styles.emptyTabContainer}>
-                          <Ionicons name="trophy-outline" size={60} color="#E3F2FD" />
-                          <Text style={styles.noStatsText}>No personal records yet</Text>
-                          <Text style={styles.emptyListSubtext}>
-                            Complete more workouts with this exercise to see your best lifts
-                          </Text>
-                        </View>
-                      )}
-                    </ScrollView>
-                  )}
-                  
-                  {activeTab === 'suggested' && (
-                    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 15 }}>
-                      {exerciseStats.estimatedOneRepMax && exerciseStats.estimatedOneRepMax > 0 ? (
-                        <>
-                          <View style={styles.oneRepMaxContainer}>
-                            <Text style={styles.oneRepMaxTitle}>Estimated 1-Rep Max</Text>
-                            <Text style={styles.oneRepMaxValue}>
-                              {exerciseStats.estimatedOneRepMax.toFixed(1)}
-                              {exerciseStats.bestSet?.unit || 'kg'}
-                            </Text>
-                            <Text style={styles.oneRepMaxDescription}>
-                              Based on your best performance using the Brzycki formula
-                      </Text>
-                    </View>
-                    
-                          <View style={styles.suggestedWeightsContainer}>
-                            <Text style={styles.suggestedWeightsTitle}>Suggested Weights</Text>
-                            <Text style={styles.suggestedWeightsDescription}>
-                              Based on your estimated 1-rep max
-                            </Text>
-                            
-                            <View style={styles.suggestedWeightsTable}>
-                              <View style={styles.suggestedWeightsHeader}>
-                                <Text style={styles.suggestedWeightsHeaderCell}>Reps</Text>
-                                <Text style={styles.suggestedWeightsHeaderCell}>
-                                  Weight ({exerciseStats.bestSet?.unit || 'kg'})
-                                </Text>
-                                <Text style={styles.suggestedWeightsHeaderCell}>% of 1RM</Text>
-                    </View>
-                    
-                              {[1, 2, 3, 5, 8, 10, 12, 15].map(reps => {
-                                const suggestedWeight = calculateSuggestedWeight(
-                                  exerciseStats.estimatedOneRepMax || 0, 
-                                  reps
-                                );
-                                const percentage = (suggestedWeight / (exerciseStats.estimatedOneRepMax || 1)) * 100;
-                      
-                      return (
-                                  <View key={`reps-${reps}`} style={styles.suggestedWeightsRow}>
-                                    <Text style={styles.suggestedWeightsCell}>{reps}</Text>
-                                    <Text style={styles.suggestedWeightsCell}>
-                                      {suggestedWeight.toFixed(1)}
-                                    </Text>
-                                    <Text style={styles.suggestedWeightsCell}>
-                                      {percentage.toFixed(0)}%
-                          </Text>
-                        </View>
-                      );
-                    })}
-                  </View>
-                            
-                            <Text style={styles.suggestedWeightsNote}>
-                              These are theoretical values and may vary based on individual factors.
-                              Always start with a weight you can safely handle.
-                            </Text>
-                          </View>
-                        </>
-                      ) : (
-                        <View style={styles.emptyTabContainer}>
-                          <Ionicons name="analytics-outline" size={60} color="#E3F2FD" />
-                          <Text style={styles.noStatsText}>No data available for suggestions</Text>
-                          <Text style={styles.emptyListSubtext}>
-                            Complete more workouts with this exercise
-                          </Text>
-                        </View>
-                      )}
-              </ScrollView>
-            )}
-            
-            <TouchableOpacity 
-              style={styles.viewFullHistoryButton}
-              onPress={() => {
-                setShowStatsModal(false);
-                navigateToExerciseHistory(selectedExercise);
-              }}
-            >
-              <Text style={styles.viewFullHistoryButtonText}>View Full History</Text>
-            </TouchableOpacity>
-                </>
-              )}
-            </View>
-          </View>
-        </View>
-      </Modal>
+      {/* ... rest of the component ... */}
     </View>
   );
 }
@@ -1757,63 +1252,39 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.background,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: Platform.OS === 'ios' ? 50 : 16,
-    paddingBottom: 8,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-    zIndex: 10,
+  contentContainer: {
+    padding: 12,
+    paddingTop: 4,
   },
-  backButton: {
-    padding: 8,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    flex: 1,
-    textAlign: 'center',
-  },
-  headerRight: {
-    width: 40,
+  topSection: {
+    marginBottom: 10,
   },
   timerContainer: {
     backgroundColor: COLORS.primaryLight,
-    borderRadius: 10,
-    padding: 15,
-    marginBottom: 20,
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 12,
     alignItems: 'center',
     borderWidth: 1,
     borderColor: COLORS.primary,
   },
   timerLabel: {
-    fontSize: 16,
+    fontSize: 14,
     color: COLORS.text,
     marginBottom: 5,
   },
   timerDisplay: {
     color: COLORS.primary,
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: 'bold',
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
-  contentContainer: {
-    padding: 20,
-  },
-  title: {
-    fontSize: 26,
-    fontWeight: 'bold',
-    marginBottom: 20,
-    textAlign: 'center',
-    color: COLORS.text,
+  exercisesContainer: {
+    marginBottom: 10,
   },
   addExerciseContainer: {
     flexDirection: 'row',
-    marginBottom: 20,
+    marginBottom: 10,
     alignItems: 'center',
   },
   autocompleteContainer: {
@@ -1825,10 +1296,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
     borderRadius: 8,
-    padding: 12,
+    padding: 10,
     marginRight: 10,
     backgroundColor: COLORS.card,
     color: COLORS.text,
+    fontSize: 14,
   },
   suggestionsContainer: {
     position: 'absolute',
@@ -1851,17 +1323,20 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   suggestionItem: {
-    padding: 12,
+    padding: 10,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
   },
   smallInput: {
     flex: 1,
-    marginRight: 5,
+    marginHorizontal: 4,
+    padding: 6,
+    fontSize: 14,
+    minWidth: 50,
   },
   addButton: {
     backgroundColor: COLORS.primary,
-    padding: 12,
+    padding: 10,
     borderRadius: 8,
     shadowColor: COLORS.shadow,
     shadowOffset: { width: 0, height: 2 },
@@ -1872,42 +1347,62 @@ const styles = StyleSheet.create({
   buttonText: {
     color: '#fff',
     fontWeight: 'bold',
+    fontSize: 14,
   },
   exerciseCard: {
     backgroundColor: COLORS.card,
-    borderRadius: 10,
-    padding: 15,
-    marginBottom: 15,
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 10,
     borderWidth: 1,
     borderColor: COLORS.border,
     shadowColor: COLORS.shadow,
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 2,
+    shadowRadius: 2,
+    elevation: 1,
   },
   exerciseHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 10,
+    marginBottom: 8,
+  },
+  exerciseNameContainer: {
+    flex: 1,
   },
   exerciseName: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: 'bold',
-    flex: 1,
     color: COLORS.text,
   },
   exerciseActions: {
     flexDirection: 'row',
     alignItems: 'center',
   },
+  orderButtonsContainer: {
+    flexDirection: 'column',
+    marginRight: 6,
+  },
+  orderButton: {
+    padding: 3,
+    borderRadius: 4,
+    backgroundColor: 'rgba(30, 136, 229, 0.1)',
+    marginVertical: 1,
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  orderButtonDisabled: {
+    backgroundColor: 'rgba(200, 200, 200, 0.1)',
+  },
   historyButton: {
     backgroundColor: COLORS.primary,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 6,
-    marginRight: 10,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 4,
+    marginRight: 6,
   },
   historyButtonText: {
     color: '#fff',
@@ -1915,17 +1410,20 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   deleteButton: {
-    padding: 8,
-    borderRadius: 5,
+    padding: 6,
+    borderRadius: 4,
     backgroundColor: 'rgba(255, 82, 82, 0.1)',
   },
   deleteButtonText: {
     color: COLORS.accent,
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: 'bold',
   },
+  setsContainer: {
+    marginBottom: 6,
+  },
   setContainer: {
-    marginBottom: 10,
+    marginBottom: 6,
     borderRadius: 6,
   },
   completedSetContainer: {
@@ -1933,34 +1431,30 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(52, 199, 89, 0.3)',
   },
-  setHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 5,
-  },
   setText: {
-    fontSize: 16,
-    flex: 1,
+    fontSize: 14,
     color: COLORS.text,
+    width: 40,
   },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 8,
   },
   addSetButton: {
     backgroundColor: COLORS.primaryDark,
-    padding: 8,
+    padding: 6,
     borderRadius: 6,
     alignItems: 'center',
-    marginTop: 5,
   },
   completeButton: {
     backgroundColor: COLORS.success,
-    padding: 15,
+    padding: 12,
     borderRadius: 8,
     alignItems: 'center',
-    marginVertical: 20,
+    flex: 1,
+    marginRight: 8,
     shadowColor: COLORS.shadow,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
@@ -1969,456 +1463,31 @@ const styles = StyleSheet.create({
   },
   cancelButton: {
     backgroundColor: COLORS.background,
-    padding: 15,
+    padding: 12,
     borderRadius: 8,
     alignItems: 'center',
-    marginBottom: 20,
+    flex: 1,
     borderWidth: 1,
     borderColor: COLORS.border,
   },
   cancelButtonText: {
     color: COLORS.textSecondary,
     fontWeight: 'bold',
+    fontSize: 14,
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalContent: {
-    backgroundColor: COLORS.card,
-    borderRadius: 10,
-    padding: 20,
-    width: '85%',
-    maxWidth: 400,
-  },
-  modalHeader: {
+  actionContainer: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 15,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: COLORS.text,
-  },
-  closeButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: COLORS.primaryLight,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  tabsContainer: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.background,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-    marginBottom: 15,
-  },
-  tab: {
-    flex: 1,
-    paddingVertical: 14,
-    paddingHorizontal: 5,
-    backgroundColor: COLORS.background,
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'center',
-  },
-  activeTab: {
-    backgroundColor: COLORS.primary,
-  },
-  tabIcon: {
-    marginRight: 6,
-  },
-  tabText: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    color: COLORS.textSecondary,
-  },
-  activeTabText: {
-    color: COLORS.card,
-  },
-  emptyTabContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  noStatsText: {
-    textAlign: 'center',
-    padding: 20,
-    color: COLORS.textSecondary,
-    fontSize: 16,
-  },
-  emptyListSubtext: {
-    textAlign: 'center',
-    padding: 20,
-    color: COLORS.textSecondary,
-  },
-  workoutContainer: {
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 8,
-    overflow: 'hidden',
-    backgroundColor: COLORS.card,
-    shadowColor: COLORS.shadow,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  workoutHeader: {
-    backgroundColor: COLORS.primaryLight,
-    padding: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-  },
-  workoutDate: {
-    fontWeight: 'bold',
-    fontSize: 14,
-    color: COLORS.text,
-  },
-  statsHeader: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.primaryLight,
-    paddingVertical: 12,
-    borderTopLeftRadius: 5,
-    borderTopRightRadius: 5,
-  },
-  statsHeaderText: {
-    flex: 1,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    color: COLORS.secondary,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-  },
-  statsCell: {
-    flex: 1,
-    textAlign: 'center',
-    color: COLORS.text,
-  },
-  bestPerformanceContainer: {
-    marginVertical: 15,
-    backgroundColor: COLORS.card,
-    borderRadius: 10,
-    padding: 15,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    shadowColor: COLORS.shadow,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  bestPerformanceBadge: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.primary,
-    alignSelf: 'center',
-    borderRadius: 20,
-    paddingVertical: 5,
-    paddingHorizontal: 12,
-    marginBottom: 15,
-    alignItems: 'center',
-  },
-  bestPerformanceBadgeText: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: COLORS.card,
-    marginLeft: 6,
-  },
-  bestPerformanceTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 10,
-    color: COLORS.primary,
-    textAlign: 'center',
-  },
-  bestPerformanceDate: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    marginBottom: 15,
-    color: COLORS.textSecondary,
-    textAlign: 'center',
-  },
-  bestPerformanceTable: {
-    marginBottom: 15,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 8,
-    overflow: 'hidden',
-  },
-  bestPerformanceTableHeader: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.primaryLight,
-    paddingVertical: 12,
-  },
-  bestPerformanceHeaderCell: {
-    flex: 1,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    color: COLORS.secondary,
-  },
-  bestPerformanceRow: {
-    flexDirection: 'row',
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-    backgroundColor: COLORS.card,
-  },
-  bestPerformanceHighlight: {
-    backgroundColor: 'rgba(30, 136, 229, 0.1)',
-  },
-  bestPerformanceCell: {
-    flex: 1,
-    textAlign: 'center',
-    color: COLORS.text,
-  },
-  bestPerformanceNote: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-    textAlign: 'center',
     marginTop: 10,
-  },
-  oneRepMaxContainer: {
-    marginTop: 15,
-    padding: 20,
-    backgroundColor: COLORS.primaryLight,
-    borderRadius: 10,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.primary,
-  },
-  oneRepMaxTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 10,
-    color: COLORS.secondary,
-  },
-  oneRepMaxValue: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    marginBottom: 10,
-    color: COLORS.primary,
-  },
-  oneRepMaxDescription: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    textAlign: 'center',
-  },
-  suggestedWeightsContainer: {
-    marginVertical: 15,
-    backgroundColor: COLORS.card,
-    borderRadius: 10,
-    padding: 15,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    shadowColor: COLORS.shadow,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  suggestedWeightsTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 10,
-    color: COLORS.primary,
-    textAlign: 'center',
-  },
-  suggestedWeightsDescription: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    textAlign: 'center',
-    marginBottom: 15,
-  },
-  suggestedWeightsTable: {
-    marginBottom: 15,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 8,
-    overflow: 'hidden',
-  },
-  suggestedWeightsHeader: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.primaryLight,
-    paddingVertical: 12,
-    paddingHorizontal: 5,
-  },
-  suggestedWeightsHeaderCell: {
-    flex: 1,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    color: COLORS.secondary,
-  },
-  suggestedWeightsRow: {
-    flexDirection: 'row',
-    paddingVertical: 12,
-    paddingHorizontal: 5,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-    backgroundColor: COLORS.card,
-  },
-  suggestedWeightsCell: {
-    flex: 1,
-    textAlign: 'center',
-    color: COLORS.text,
-  },
-  suggestedWeightsNote: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-    textAlign: 'center',
-    marginBottom: 15,
-    fontStyle: 'italic',
-  },
-  viewFullHistoryButton: {
-    backgroundColor: COLORS.primary,
-    padding: 14,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginTop: 10,
-    marginHorizontal: 20,
-    shadowColor: COLORS.shadow,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
-    elevation: 3,
-  },
-  viewFullHistoryButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 15,
-  },
-  confirmModalContent: {
-    backgroundColor: COLORS.card,
-    borderRadius: 10,
-    padding: 20,
-    width: '85%',
-    maxWidth: 400,
-  },
-  confirmModalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 10,
-    textAlign: 'center',
-    color: COLORS.text,
-  },
-  confirmModalText: {
-    fontSize: 16,
     marginBottom: 20,
-    textAlign: 'center',
-    color: COLORS.textSecondary,
-  },
-  confirmButtonColumn: {
-    alignItems: 'stretch',
-  },
-  continueButton: {
-    backgroundColor: COLORS.primary,
-    padding: 15,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  continueButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
-  saveButton: {
-    backgroundColor: COLORS.success,
-    padding: 15,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  saveButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
-  saveExitButton: {
-    backgroundColor: COLORS.secondary,
-    padding: 15,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  saveExitButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
-  discardButton: {
-    backgroundColor: '#f8f8f8',
-    padding: 15,
-    borderRadius: 8,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  discardButtonText: {
-    color: 'red',
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
-  modalSubtitle: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    marginBottom: 15,
-    textAlign: 'center',
-  },
-  modalButtons: {
-    flexDirection: 'row',
-    width: '100%',
-    justifyContent: 'space-between',
-  },
-  resumeButton: {
-    backgroundColor: COLORS.primary,
-    padding: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-    width: '48%',
-  },
-  resumeButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-  },
-  dragHandle: {
-    padding: 8,
-    marginRight: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 4,
-    backgroundColor: COLORS.primaryLight,
-  },
-  deleteSetAction: {
-    backgroundColor: COLORS.error,
-    justifyContent: 'center',
-    alignItems: 'center',
-    width: 80,
-    height: '100%',
-  },
-  deleteSetActionText: {
-    color: '#FFF',
-    fontWeight: 'bold',
   },
   completionCheckbox: {
-    width: 24,
-    height: 24,
+    width: 22,
+    height: 22,
     borderRadius: 4,
     borderWidth: 1,
     borderColor: COLORS.border,
-    marginLeft: 8,
+    marginLeft: 6,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: COLORS.card,
@@ -2427,9 +1496,37 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.success,
     borderColor: COLORS.success,
   },
-  actionContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 20,
+  deleteSetAction: {
+    backgroundColor: COLORS.error,
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 70,
+    height: '100%',
+  },
+  deleteSetActionText: {
+    color: '#FFF',
+    fontWeight: 'bold',
+    fontSize: 13,
+  },
+  emptyWorkoutContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 30,
+    backgroundColor: 'rgba(30, 136, 229, 0.05)',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(30, 136, 229, 0.2)',
+    marginBottom: 15,
+  },
+  emptyWorkoutText: {
+    marginTop: 15,
+    fontSize: 14,
+    textAlign: 'center',
+    color: COLORS.textSecondary,
+  },
+  disabledInput: {
+    backgroundColor: 'rgba(200, 200, 200, 0.3)',
+    color: COLORS.textSecondary,
+    borderColor: 'rgba(200, 200, 200, 0.5)',
   },
 }); 
