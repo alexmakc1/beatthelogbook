@@ -13,6 +13,7 @@ export interface Set {
   id: string;
   reps: string;
   weight: string;
+  completed?: boolean; // Add optional completed property
 }
 
 export interface Workout {

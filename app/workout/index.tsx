@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { 
   View, 
   Text, 
@@ -20,6 +20,14 @@ import * as storageService from '../../services/storageService';
 import * as settingsService from '../../services/settingsService';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { COLORS } from '../../services/colors';
+import { Swipeable, PanGestureHandler } from 'react-native-gesture-handler';
+import Animated, { 
+  useAnimatedStyle, 
+  useSharedValue, 
+  withSpring, 
+  useAnimatedGestureHandler,
+  runOnJS
+} from 'react-native-reanimated';
 
 // Generate a unique ID
 const generateId = () => {
@@ -79,6 +87,188 @@ interface ExerciseStats {
   workouts?: WorkoutStat[];
 }
 
+// Add completed field to the Set type if it doesn't exist
+interface SetWithCompletion extends storageService.Set {
+  completed?: boolean;
+}
+
+// Create a separate component for each exercise to avoid hooks in loops
+const ExerciseItem = React.memo(({ 
+  exercise, 
+  exerciseIndex, 
+  translateY, 
+  opacity, 
+  zIndex, 
+  scale,
+  onLayout,
+  onDragStart,
+  onDragMove,
+  onDragEnd,
+  deleteExercise,
+  viewExerciseHistory,
+  addSet,
+  deleteSet,
+  updateWeight,
+  updateReps,
+  toggleSetCompletion,
+  handleSwipeableRef
+}: { 
+  exercise: Exercise;
+  exerciseIndex: number;
+  translateY: Animated.SharedValue<number>;
+  opacity: Animated.SharedValue<number>;
+  zIndex: Animated.SharedValue<number>;
+  scale: Animated.SharedValue<number>;
+  onLayout: (event: any) => void;
+  onDragStart: (index: number) => void;
+  onDragMove: (index: number, absoluteY: number) => void;
+  onDragEnd: () => void;
+  deleteExercise: (id: string) => void;
+  viewExerciseHistory: (name: string) => void;
+  addSet: (exerciseId: string) => void;
+  deleteSet: (exerciseId: string, setId: string) => void;
+  updateWeight: (exerciseId: string, setId: string, weight: string) => void;
+  updateReps: (exerciseId: string, setId: string, reps: string) => void;
+  toggleSetCompletion: (exerciseId: string, setId: string) => void;
+  handleSwipeableRef: (ref: Swipeable | null, exerciseIndex: number, setIndex: number) => void;
+}) => {
+  // Create animated style for this specific exercise
+  const animatedStyle = useAnimatedStyle(() => {
+    return {
+      transform: [
+        { translateY: translateY.value },
+        { scale: scale.value }
+      ],
+      opacity: opacity.value,
+      zIndex: zIndex.value,
+    };
+  });
+  
+  // Create gesture handler for this exercise
+  const gestureHandler = useAnimatedGestureHandler({
+    onStart: () => {
+      runOnJS(onDragStart)(exerciseIndex);
+      translateY.value = 0;
+      zIndex.value = 100;
+      scale.value = withSpring(1.03);
+      opacity.value = withSpring(0.9);
+    },
+    onActive: (event) => {
+      translateY.value = event.translationY;
+      runOnJS(onDragMove)(exerciseIndex, event.absoluteY);
+    },
+    onEnd: () => {
+      runOnJS(onDragEnd)();
+      translateY.value = withSpring(0);
+      zIndex.value = 1;
+      scale.value = withSpring(1);
+      opacity.value = withSpring(1);
+    },
+  });
+
+  // Render a set row with swipe-to-delete
+  const renderSet = (set: SetWithCompletion, index: number) => {
+    const isCompleted = set.completed;
+    
+    // Add swipe-to-delete functionality for sets
+    const renderRightActions = () => (
+      <TouchableOpacity
+        style={styles.deleteSetAction}
+        onPress={() => deleteSet(exercise.id, set.id)}
+      >
+        <Text style={styles.deleteSetActionText}>Delete</Text>
+      </TouchableOpacity>
+    );
+    
+    return (
+      <Swipeable
+        key={set.id}
+        ref={ref => handleSwipeableRef(ref, exerciseIndex, index)}
+        renderRightActions={renderRightActions}
+        overshootRight={false}
+      >
+        <View style={[
+          styles.setContainer,
+          isCompleted && styles.completedSetContainer
+        ]}>
+          <View style={styles.setHeader}>
+            <Text style={styles.setText}>Set {index + 1}</Text>
+          </View>
+          <View style={styles.inputRow}>
+            {/* Weight first, then reps */}
+            <TextInput
+              style={[styles.input, styles.smallInput]}
+              placeholder="Weight"
+              keyboardType="numeric"
+              value={set.weight}
+              onChangeText={(text) => updateWeight(exercise.id, set.id, text)}
+            />
+            <TextInput
+              style={[styles.input, styles.smallInput]}
+              placeholder="Reps"
+              keyboardType="numeric"
+              value={set.reps}
+              onChangeText={(text) => updateReps(exercise.id, set.id, text)}
+            />
+            {/* Add checkbox for completion */}
+            <TouchableOpacity
+              style={[
+                styles.completionCheckbox,
+                isCompleted && styles.completionCheckboxChecked
+              ]}
+              onPress={() => toggleSetCompletion(exercise.id, set.id)}
+            >
+              {isCompleted && (
+                <Ionicons name="checkmark" size={16} color="#FFF" />
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Swipeable>
+    );
+  };
+
+  return (
+    <Animated.View 
+      key={exercise.id} 
+      style={[styles.exerciseCard, animatedStyle]}
+      onLayout={onLayout}
+    >
+      <View style={styles.exerciseHeader}>
+        <PanGestureHandler onGestureEvent={gestureHandler}>
+          <Animated.View style={styles.dragHandle}>
+            <Ionicons name="reorder-two" size={24} color={COLORS.textSecondary} />
+          </Animated.View>
+        </PanGestureHandler>
+        <Text style={styles.exerciseName}>{exercise.name}</Text>
+        <View style={styles.exerciseActions}>
+          <TouchableOpacity
+            style={styles.historyButton}
+            onPress={() => viewExerciseHistory(exercise.name)}
+          >
+            <Text style={styles.historyButtonText}>View History</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.deleteButton}
+            onPress={() => deleteExercise(exercise.id)}
+          >
+            <Text style={styles.deleteButtonText}>✕</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+      
+      {exercise.sets.map((set, index) => renderSet(set as SetWithCompletion, index))}
+      
+      <TouchableOpacity 
+        style={styles.addSetButton}
+        onPress={() => addSet(exercise.id)}
+      >
+        <Text style={styles.buttonText}>Add Set</Text>
+      </TouchableOpacity>
+    </Animated.View>
+  );
+});
+
 export default function WorkoutScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ exercises?: string, restore?: string }>();
@@ -105,7 +295,57 @@ export default function WorkoutScreen() {
   const [forceRefreshKey, setForceRefreshKey] = useState(0);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'history' | 'best' | 'suggested'>('history');
-
+  
+  // Add state for tracking dragging
+  const [draggingExerciseIndex, setDraggingExerciseIndex] = useState<number | null>(null);
+  
+  // Create refs for animated values outside the render loop
+  const swipeableRefs = useRef<Array<Swipeable | null>>([]);
+  const exercisePositions = useRef<Array<{y: number, height: number}>>([]);
+  
+  // Pre-create a fixed number of animation values to avoid hook issues
+  const MAX_EXERCISES = 30; // Choose a reasonable upper limit for exercises
+  const MAX_SETS_PER_EXERCISE = 30; // Maximum sets per exercise
+  const translateYValues = useRef<Animated.SharedValue<number>[]>(
+    Array(MAX_EXERCISES).fill(0).map(() => useSharedValue(0))
+  );
+  const opacityValues = useRef<Animated.SharedValue<number>[]>(
+    Array(MAX_EXERCISES).fill(0).map(() => useSharedValue(1))
+  );
+  const zIndexValues = useRef<Animated.SharedValue<number>[]>(
+    Array(MAX_EXERCISES).fill(0).map(() => useSharedValue(1))
+  );
+  const scaleValues = useRef<Animated.SharedValue<number>[]>(
+    Array(MAX_EXERCISES).fill(0).map(() => useSharedValue(1))
+  );
+  
+  // Reset animation values when exercises change
+  useEffect(() => {
+    // Reset animation values for all exercises
+    translateYValues.current.forEach(value => {
+      value.value = 0;
+    });
+    opacityValues.current.forEach(value => {
+      value.value = 1;
+    });
+    zIndexValues.current.forEach(value => {
+      value.value = 1;
+    });
+    scaleValues.current.forEach(value => {
+      value.value = 1;
+    });
+    
+    // Initialize swipeableRefs array
+    if (!swipeableRefs.current) {
+      swipeableRefs.current = [];
+    }
+    // Pre-populate with enough elements for all possible exercise-set combinations
+    const totalNeeded = MAX_EXERCISES * MAX_SETS_PER_EXERCISE;
+    while (swipeableRefs.current.length < totalNeeded) {
+      swipeableRefs.current.push(null);
+    }
+  }, [exercises.length]);
+  
   // Save active workout when exercises change
   useEffect(() => {
     if (exercises.length > 0) {
@@ -437,34 +677,29 @@ export default function WorkoutScreen() {
   };
 
   // Add a new set to an exercise
-  const addSet = async (exerciseId: string) => {
-    // Find the exercise name
-    const exercise = exercises.find(ex => ex.id === exerciseId);
-    if (!exercise) return;
-
-    // Get the most recent data for this exercise
-    const recentData = await storageService.getMostRecentExerciseData(exercise.name);
-    
-    const newSet: Set = {
-      id: generateId(),
-      reps: recentData?.reps || '',
-      weight: recentData?.weight || ''
-    };
-    
-    setExercises(prev => 
-      prev.map(ex => ex.id === exerciseId ? { ...ex, sets: [...ex.sets, newSet] } : ex)
-    );
+  const addSet = (exerciseId: string) => {
+    setExercises(exercises.map(exercise => 
+      exercise.id === exerciseId 
+        ? {
+            ...exercise,
+            sets: [
+              ...exercise.sets,
+              { id: generateId(), reps: '', weight: '', completed: false }
+            ]
+          }
+        : exercise
+    ));
   };
 
   // Update the reps for a set
-  const updateReps = (exerciseId: string, setId: string, reps: string) => {
+  const updateReps = (exerciseId: string, setId: string, value: string) => {
     setExercises(exercises.map(exercise => 
       exercise.id === exerciseId 
         ? {
             ...exercise,
             sets: exercise.sets.map(set => 
               set.id === setId 
-                ? { ...set, reps }
+                ? { ...set, reps: value }
                 : set
             )
           }
@@ -473,14 +708,14 @@ export default function WorkoutScreen() {
   };
 
   // Update the weight for a set
-  const updateWeight = (exerciseId: string, setId: string, weight: string) => {
+  const updateWeight = (exerciseId: string, setId: string, value: string) => {
     setExercises(exercises.map(exercise => 
       exercise.id === exerciseId 
         ? {
             ...exercise,
             sets: exercise.sets.map(set => 
               set.id === setId 
-                ? { ...set, weight }
+                ? { ...set, weight: value }
                 : set
             )
           }
@@ -892,7 +1127,143 @@ export default function WorkoutScreen() {
   const continueWorkout = () => {
     setShowCancelModal(false);
   };
+
+  // Add a function to toggle completion status of a set
+  const toggleSetCompletion = (exerciseId: string, setId: string) => {
+    setExercises(exercises.map(exercise => 
+      exercise.id === exerciseId 
+        ? {
+            ...exercise,
+            sets: exercise.sets.map(set => 
+              set.id === setId 
+                ? { ...set, completed: !(set as SetWithCompletion).completed }
+                : set
+            )
+          }
+        : exercise
+    ));
+  };
+
+  // Add a function to reorder exercises based on drag and drop
+  const reorderExercises = (fromIndex: number, toIndex: number) => {
+    const newExercises = [...exercises];
+    const [removed] = newExercises.splice(fromIndex, 1);
+    newExercises.splice(toIndex, 0, removed);
+    setExercises(newExercises);
+  };
+
+  // Function to handle starting a drag operation
+  const onDragStart = (exerciseIndex: number) => {
+    setDraggingExerciseIndex(exerciseIndex);
+  };
   
+  // Function to handle finishing a drag operation
+  const onDragEnd = () => {
+    setDraggingExerciseIndex(null);
+  };
+  
+  // Function to handle the drag movement and determine the new position
+  const onDragMove = (exerciseIndex: number, dragY: number) => {
+    if (draggingExerciseIndex === null || exercisePositions.current.length !== exercises.length) {
+      return;
+    }
+    
+    // Calculate the center position of the dragged exercise
+    const draggedItemHeight = exercisePositions.current[exerciseIndex].height;
+    const draggedItemCenter = dragY + draggedItemHeight / 2;
+    
+    // Find the index to swap with
+    let newIndex = exerciseIndex;
+    
+    // Check if we should move it up
+    for (let i = 0; i < exerciseIndex; i++) {
+      const { y, height } = exercisePositions.current[i];
+      const itemCenter = y + height / 2;
+      
+      if (draggedItemCenter < itemCenter) {
+        newIndex = i;
+        break;
+      }
+    }
+    
+    // Check if we should move it down
+    if (newIndex === exerciseIndex) {
+      for (let i = exercises.length - 1; i > exerciseIndex; i--) {
+        const { y, height } = exercisePositions.current[i];
+        const itemCenter = y + height / 2;
+        
+        if (draggedItemCenter > itemCenter) {
+          newIndex = i;
+          break;
+        }
+      }
+    }
+    
+    // Reorder the exercises if needed
+    if (newIndex !== exerciseIndex) {
+      reorderExercises(exerciseIndex, newIndex);
+      setDraggingExerciseIndex(newIndex);
+    }
+  };
+
+  // Define the animated style and gesture handler creators for use in the render function
+  const createAnimatedStyle = (translateY: Animated.SharedValue<number>, scale: Animated.SharedValue<number>, 
+                              opacity: Animated.SharedValue<number>, zIndex: Animated.SharedValue<number>) => {
+    return {
+      transform: [
+        { translateY: translateY.value },
+        { scale: scale.value }
+      ],
+      opacity: opacity.value,
+      zIndex: zIndex.value,
+    };
+  };
+
+  // This function creates a gesture handler for a given exercise
+  const createDragGestureHandler = (
+    index: number, 
+    onStart: (index: number) => void,
+    onMove: (index: number, absoluteY: number) => void, 
+    onEnd: () => void
+  ) => {
+    return (event: any) => {
+      if (event.state === 1) { // State began
+        onStart(index);
+        translateYValues.current[index].value = 0;
+        zIndexValues.current[index].value = 100;
+        scaleValues.current[index].value = withSpring(1.03);
+        opacityValues.current[index].value = withSpring(0.9);
+      } else if (event.state === 2) { // State changed
+        translateYValues.current[index].value = event.translationY;
+        onMove(index, event.absoluteY);
+      } else if (event.state === 3 || event.state === 5) { // State ended or cancelled
+        onEnd();
+        translateYValues.current[index].value = withSpring(0);
+        zIndexValues.current[index].value = 1;
+        scaleValues.current[index].value = withSpring(1);
+        opacityValues.current[index].value = withSpring(1);
+      }
+    };
+  };
+
+  // Create a callback for handling swipeable refs  
+  const handleSwipeableRef = useCallback((ref: Swipeable | null, exerciseIndex: number, setIndex: number) => {
+    if (!swipeableRefs.current) {
+      swipeableRefs.current = [];
+    }
+    
+    // Calculate a unique index for this exercise-set combination
+    const swipeableIndex = exerciseIndex * MAX_SETS_PER_EXERCISE + setIndex;
+    
+    // Ensure array is large enough
+    while (swipeableRefs.current.length <= swipeableIndex) {
+      swipeableRefs.current.push(null);
+    }
+    
+    // Store the ref
+    swipeableRefs.current[swipeableIndex] = ref;
+  }, []);
+
   return (
     <View style={styles.container} key={`workout-container-${forceRefreshKey}`}>
       <View style={styles.header}>
@@ -949,85 +1320,56 @@ export default function WorkoutScreen() {
           </TouchableOpacity>
         </View>
         
-        {exercises.map(exercise => (
-          <View key={exercise.id} style={styles.exerciseCard}>
-            <View style={styles.exerciseHeader}>
-              <Text style={styles.exerciseName}>{exercise.name}</Text>
-              <View style={styles.exerciseActions}>
-                <TouchableOpacity
-                  style={styles.historyButton}
-                  onPress={() => viewExerciseHistory(exercise.name)}
-                >
-                  <Text style={styles.historyButtonText}>View History</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.deleteButton}
-                  onPress={() => deleteExercise(exercise.id)}
-                >
-                  <Text style={styles.deleteButtonText}>✕</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-            
-            {exercise.sets.map((set, index) => (
-              <View key={set.id} style={styles.setContainer}>
-                <View style={styles.setHeader}>
-                  <Text style={styles.setText}>Set {index + 1}</Text>
-                  <TouchableOpacity
-                    style={styles.deleteSetButton}
-                    onPress={() => deleteSet(exercise.id, set.id)}
-                  >
-                    <Text style={styles.deleteButtonText}>✕</Text>
-                  </TouchableOpacity>
-                </View>
-                <View style={styles.inputRow}>
-                  <TextInput
-                    style={[styles.input, styles.smallInput]}
-                    placeholder="Reps"
-                    keyboardType="numeric"
-                    value={set.reps}
-                    onChangeText={(text) => updateReps(exercise.id, set.id, text)}
-                  />
-                  <TextInput
-                    style={[styles.input, styles.smallInput]}
-                    placeholder="Weight"
-                    keyboardType="numeric"
-                    value={set.weight}
-                    onChangeText={(text) => updateWeight(exercise.id, set.id, text)}
-                  />
-                </View>
-              </View>
-            ))}
-            
-            <TouchableOpacity 
-              style={styles.addSetButton}
-              onPress={() => addSet(exercise.id)}
-            >
-              <Text style={styles.buttonText}>Add Set</Text>
-            </TouchableOpacity>
-          </View>
+        {exercises.map((exercise, exerciseIndex) => (
+          <ExerciseItem 
+            key={exercise.id}
+            exercise={exercise}
+            exerciseIndex={exerciseIndex}
+            translateY={translateYValues.current[exerciseIndex]}
+            opacity={opacityValues.current[exerciseIndex]}
+            zIndex={zIndexValues.current[exerciseIndex]}
+            scale={scaleValues.current[exerciseIndex]}
+            onLayout={(event) => {
+              const { y, height } = event.nativeEvent.layout;
+              if (!exercisePositions.current) exercisePositions.current = [];
+              exercisePositions.current[exerciseIndex] = { y, height };
+            }}
+            onDragStart={onDragStart}
+            onDragMove={onDragMove}
+            onDragEnd={onDragEnd}
+            deleteExercise={deleteExercise}
+            viewExerciseHistory={viewExerciseHistory}
+            addSet={addSet}
+            deleteSet={deleteSet}
+            updateWeight={updateWeight}
+            updateReps={updateReps}
+            toggleSetCompletion={toggleSetCompletion}
+            handleSwipeableRef={handleSwipeableRef}
+          />
         ))}
         
         {exercises.length > 0 && (
-          <TouchableOpacity 
-            style={styles.completeButton}
-            onPress={handleSaveWorkout}
-            disabled={saving}
-          >
-            {saving ? (
-              <ActivityIndicator color="white" />
-            ) : (
-              <Text style={styles.buttonText}>Complete Workout</Text>
-            )}
-          </TouchableOpacity>
+          <View style={styles.actionContainer}>
+            <TouchableOpacity
+              style={styles.completeButton}
+              onPress={handleSaveWorkout}
+              disabled={saving}
+            >
+              {saving ? (
+                <ActivityIndicator color="white" />
+              ) : (
+                <Text style={styles.buttonText}>Complete Workout</Text>
+              )}
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={styles.cancelButton}
+              onPress={handleCancelWorkout}
+            >
+              <Text style={styles.cancelButtonText}>Cancel Workout</Text>
+            </TouchableOpacity>
+          </View>
         )}
-        
-        <TouchableOpacity
-          style={styles.cancelButton}
-          onPress={handleCancelWorkout}
-        >
-          <Text style={styles.cancelButtonText}>Cancel Workout</Text>
-        </TouchableOpacity>
       </ScrollView>
       
       {/* Cancel Workout Confirmation */}
@@ -1584,6 +1926,12 @@ const styles = StyleSheet.create({
   },
   setContainer: {
     marginBottom: 10,
+    borderRadius: 6,
+  },
+  completedSetContainer: {
+    backgroundColor: 'rgba(52, 199, 89, 0.1)', // Light green for completed sets
+    borderWidth: 1,
+    borderColor: 'rgba(52, 199, 89, 0.3)',
   },
   setHeader: {
     flexDirection: 'row',
@@ -1596,13 +1944,9 @@ const styles = StyleSheet.create({
     flex: 1,
     color: COLORS.text,
   },
-  deleteSetButton: {
-    padding: 6,
-    borderRadius: 5,
-    backgroundColor: 'rgba(255, 82, 82, 0.1)',
-  },
   inputRow: {
     flexDirection: 'row',
+    alignItems: 'center',
   },
   addSetButton: {
     backgroundColor: COLORS.primaryDark,
@@ -2048,5 +2392,44 @@ const styles = StyleSheet.create({
   resumeButtonText: {
     color: '#fff',
     fontWeight: 'bold',
+  },
+  dragHandle: {
+    padding: 8,
+    marginRight: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 4,
+    backgroundColor: COLORS.primaryLight,
+  },
+  deleteSetAction: {
+    backgroundColor: COLORS.error,
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 80,
+    height: '100%',
+  },
+  deleteSetActionText: {
+    color: '#FFF',
+    fontWeight: 'bold',
+  },
+  completionCheckbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginLeft: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.card,
+  },
+  completionCheckboxChecked: {
+    backgroundColor: COLORS.success,
+    borderColor: COLORS.success,
+  },
+  actionContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 20,
   },
 }); 
