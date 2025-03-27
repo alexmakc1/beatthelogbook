@@ -251,9 +251,9 @@ const WorkoutHistoryItem = ({ workout, index, weightUnit }: { workout: WorkoutSt
               </View>
               <View style={styles.setValues}>
                 <Text style={styles.weightValue}>{set.weight} {workout.weightUnit || weightUnit}</Text>
-                <Text style={styles.multiplySymbol}>×</Text>
+                <Text style={styles.multiplySymbol}> × </Text>
                 <Text style={styles.repsValue}>{set.reps} reps</Text>
-                <Text style={styles.volumeValue}>{volume.toFixed(0)}</Text>
+                <Text style={styles.volumeValue}> = {volume.toFixed(0)}</Text>
               </View>
             </View>
           );
@@ -328,6 +328,10 @@ export default function ExerciseHistoryScreen() {
       }
     }
   }, [params.exerciseName, exercises]);
+
+  useEffect(() => {
+    console.log(`Stats modal visibility changed: ${showStatsModal ? 'visible' : 'hidden'}`);
+  }, [showStatsModal]);
 
   const loadSettings = async () => {
     try {
@@ -421,6 +425,9 @@ export default function ExerciseHistoryScreen() {
       setBestPerformance(best);
       setActiveTab('history'); // Ensure we start with history tab
       
+      // Show the stats modal
+      setShowStatsModal(true);
+      
     } catch (error) {
       console.error('Error loading exercise history:', error);
       // Set empty stats with exercise name
@@ -430,6 +437,9 @@ export default function ExerciseHistoryScreen() {
       });
       setWorkoutStats([]);
       setBestPerformance(null);
+      
+      // Still show the modal even if there's no data
+      setShowStatsModal(true);
     } finally {
       setLoading(false);
     }
@@ -891,6 +901,9 @@ export default function ExerciseHistoryScreen() {
       setBestPerformance(best);
       setActiveTab('history'); // Make sure we show history tab
       
+      // Show the stats modal
+      setShowStatsModal(true);
+      
     } catch (error) {
       console.error('Error loading exercise data:', error);
       // Set empty stats with exercise name
@@ -898,6 +911,9 @@ export default function ExerciseHistoryScreen() {
         exerciseName,
         workouts: [] 
       });
+      
+      // Still show the modal even if there's no data
+      setShowStatsModal(true);
     } finally {
       setLoading(false);
     }
@@ -1410,8 +1426,9 @@ const styles = StyleSheet.create({
   },
   workoutDate: {
     fontWeight: 'bold',
-    fontSize: 14,
-    color: COLORS.text,
+    fontSize: 16,
+    color: COLORS.primary,
+    marginBottom: 8,
   },
   bestPerformanceContainer: {
     marginVertical: 15,
@@ -1682,48 +1699,63 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.5)',
+    borderRadius: 6,
+    padding: 8,
   },
   workoutMetric: {
-    flexDirection: 'row',
     alignItems: 'center',
+    paddingHorizontal: 10,
   },
   workoutMetricLabel: {
-    fontWeight: 'bold',
-    marginRight: 5,
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    marginBottom: 4,
   },
   workoutMetricValue: {
     fontWeight: 'bold',
+    fontSize: 16,
+    color: COLORS.text,
   },
   setsContainer: {
-    padding: 12,
+    padding: 15,
   },
   setRow: {
     flexDirection: 'row',
-    paddingVertical: 5,
+    paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   setInfo: {
     flex: 1,
+    marginRight: 10,
   },
   setText: {
-    fontWeight: 'bold',
+    fontWeight: '500',
+    color: COLORS.primary,
   },
   setValues: {
     flexDirection: 'row',
     alignItems: 'center',
+    flex: 3,
   },
   weightValue: {
-    flex: 1,
+    fontWeight: '600',
+    color: COLORS.text,
   },
   multiplySymbol: {
-    marginHorizontal: 5,
+    color: COLORS.textSecondary,
+    fontSize: 14,
   },
   repsValue: {
-    flex: 1,
+    fontWeight: '600',
+    color: COLORS.text,
   },
   volumeValue: {
-    flex: 1,
+    color: COLORS.textSecondary,
+    fontSize: 14,
   },
   noDataContainer: {
     flex: 1,
@@ -1745,6 +1777,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   historyListContainer: {
-    padding: 20,
+    padding: 15,
   },
 }); 
