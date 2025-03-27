@@ -40,19 +40,24 @@ export const getEntries = async (date?: Date): Promise<NicotineEntry[]> => {
 
     const entries: NicotineEntry[] = JSON.parse(entriesJson);
     
+    // Sort all entries by timestamp (newest first)
+    const sortedEntries = entries.sort((a, b) => 
+      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
+    
     if (date) {
       const startOfDay = new Date(date);
       startOfDay.setHours(0, 0, 0, 0);
       const endOfDay = new Date(date);
       endOfDay.setHours(23, 59, 59, 999);
       
-      return entries.filter(entry => {
+      return sortedEntries.filter(entry => {
         const entryDate = new Date(entry.timestamp);
         return entryDate >= startOfDay && entryDate <= endOfDay;
       });
     }
     
-    return entries;
+    return sortedEntries;
   } catch (error) {
     console.error('Error getting nicotine entries:', error);
     return [];
@@ -207,6 +212,53 @@ export const getAvailableDates = async (): Promise<Date[]> => {
       .sort((a, b) => b.getTime() - a.getTime());
   } catch (error) {
     console.error('Error getting available dates:', error);
+    return [];
+  }
+};
+
+// Get daily usage data for the past days
+export const getDailyUsageData = async (days: 7 | 30 = 7): Promise<{
+  date: string;
+  total: number;
+  count: number;
+}[]> => {
+  try {
+    const entries = await getEntries();
+    const result: { date: string; total: number; count: number }[] = [];
+
+    // Generate dates for the past N days
+    const today = new Date();
+    today.setHours(23, 59, 59, 999);
+
+    for (let i = 0; i < days; i++) {
+      const date = new Date(today);
+      date.setDate(date.getDate() - i);
+      const dateString = format(date, 'yyyy-MM-dd');
+      
+      const dayStart = new Date(date);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(date);
+      dayEnd.setHours(23, 59, 59, 999);
+      
+      // Filter entries for this day
+      const dayEntries = entries.filter(entry => {
+        const entryDate = new Date(entry.timestamp);
+        return entryDate >= dayStart && entryDate <= dayEnd;
+      });
+      
+      const total = dayEntries.reduce((sum, entry) => sum + entry.amount, 0);
+      
+      result.push({
+        date: format(date, 'MMM dd'),
+        total,
+        count: dayEntries.length,
+      });
+    }
+    
+    // Reverse so dates are in ascending order
+    return result.reverse();
+  } catch (error) {
+    console.error('Error getting daily usage data:', error);
     return [];
   }
 }; 

@@ -14,7 +14,9 @@ import {
   AppState,
   Platform,
   BackHandler,
-  StatusBar
+  StatusBar,
+  KeyboardAvoidingView,
+  Keyboard
 } from 'react-native';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import * as storageService from '../../services/storageService';
@@ -94,7 +96,9 @@ const ExerciseItem = React.memo(({
   moveExerciseDown,
   isFirst,
   isLast,
-  onViewHistory
+  onViewHistory,
+  dismissKeyboard,
+  startRestTimer
 }: { 
   exercise: Exercise;
   exerciseIndex: number;
@@ -110,6 +114,8 @@ const ExerciseItem = React.memo(({
   isFirst: boolean;
   isLast: boolean;
   onViewHistory: (exerciseName: string) => void;
+  dismissKeyboard: () => void;
+  startRestTimer: () => void;
 }) => {
   // Render a set row with swipe-to-delete
   const renderSet = (set: SetWithCompletion, index: number) => {
@@ -150,6 +156,9 @@ const ExerciseItem = React.memo(({
               onChangeText={(text) => updateWeight(exercise.id, set.id, text)}
               editable={!isCompleted}
               selectTextOnFocus={true}
+              returnKeyType="done"
+              onSubmitEditing={dismissKeyboard}
+              blurOnSubmit={true}
             />
             <TextInput
               style={[
@@ -163,13 +172,21 @@ const ExerciseItem = React.memo(({
               onChangeText={(text) => updateReps(exercise.id, set.id, text)}
               editable={!isCompleted}
               selectTextOnFocus={true}
+              returnKeyType="done"
+              onSubmitEditing={dismissKeyboard}
+              blurOnSubmit={true}
             />
             <TouchableOpacity
               style={[
                 styles.completionCheckbox,
                 isCompleted && styles.completionCheckboxChecked
               ]}
-              onPress={() => toggleSetCompletion(exercise.id, set.id)}
+              onPress={() => {
+                toggleSetCompletion(exercise.id, set.id);
+                if (!isCompleted) {
+                  startRestTimer();
+                }
+              }}
             >
               {isCompleted && (
                 <Ionicons name="checkmark" size={14} color="#FFF" />
@@ -1127,6 +1144,125 @@ export default function WorkoutScreen() {
     }
   }, [historyDays]);
 
+  // Add keyboard dismiss functionality
+  const dismissKeyboard = () => {
+    Keyboard.dismiss();
+  };
+
+  useEffect(() => {
+    // Setup event listeners to dismiss keyboard when tapping outside
+    const keyboardDidHideListener = Keyboard.addListener(
+      'keyboardDidHide',
+      dismissKeyboard
+    );
+
+    // Clean up listener on unmount
+    return () => {
+      keyboardDidHideListener.remove();
+    };
+  }, []);
+
+  // Add function to handle scroll to dismiss keyboard
+  const handleScroll = () => {
+    Keyboard.dismiss();
+  };
+
+  // Add rest timer state
+  const [restTimer, setRestTimer] = useState<{
+    isActive: boolean;
+    timeLeft: number;
+    duration: number;
+  }>({
+    isActive: false,
+    timeLeft: 0,
+    duration: 60 // Default 60 seconds rest
+  });
+
+  // Add rest timer controls
+  const startRestTimer = () => {
+    setRestTimer(prev => ({
+      ...prev,
+      isActive: true,
+      timeLeft: prev.duration
+    }));
+  };
+
+  const stopRestTimer = () => {
+    setRestTimer(prev => ({
+      ...prev,
+      isActive: false,
+      timeLeft: 0
+    }));
+  };
+
+  const adjustRestTimer = (seconds: number) => {
+    setRestTimer(prev => ({
+      ...prev,
+      timeLeft: Math.max(0, prev.timeLeft + seconds),
+      duration: Math.max(0, prev.duration + seconds)
+    }));
+  };
+
+  // Add rest timer effect
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    
+    if (restTimer.isActive && restTimer.timeLeft > 0) {
+      interval = setInterval(() => {
+        setRestTimer(prev => ({
+          ...prev,
+          timeLeft: prev.timeLeft - 1
+        }));
+      }, 1000);
+    } else if (restTimer.timeLeft === 0) {
+      stopRestTimer();
+    }
+    
+    return () => {
+      if (interval) {
+        clearInterval(interval);
+      }
+    };
+  }, [restTimer.isActive, restTimer.timeLeft]);
+
+  // Add RestTimer to the main render
+  const RestTimer = () => {
+    if (!restTimer.isActive) return null;
+    
+    const minutes = Math.floor(restTimer.timeLeft / 60);
+    const seconds = restTimer.timeLeft % 60;
+    const timeString = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    
+    return (
+      <View style={styles.restTimerContainer}>
+        <View style={styles.restTimerContent}>
+          <Text style={styles.restTimerLabel}>Rest Timer</Text>
+          <Text style={styles.restTimerValue}>{timeString}</Text>
+          <View style={styles.restTimerControls}>
+            <TouchableOpacity
+              style={styles.restTimerButton}
+              onPress={() => adjustRestTimer(-10)}
+            >
+              <Text style={styles.restTimerButtonText}>-10s</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.restTimerButton}
+              onPress={stopRestTimer}
+            >
+              <Text style={styles.restTimerButtonText}>Skip</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.restTimerButton}
+              onPress={() => adjustRestTimer(10)}
+            >
+              <Text style={styles.restTimerButtonText}>+10s</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    );
+  };
+
   return (
     <>
       <StatusBar 
@@ -1134,118 +1270,134 @@ export default function WorkoutScreen() {
         backgroundColor="#fff"
         translucent={Platform.OS === 'android'}
       />
-      <View style={[
-        styles.container,
-        Platform.OS === 'android' && { paddingTop: StatusBar.currentHeight || 0 }
-      ]} key={`workout-container-${forceRefreshKey}`}>
-        <TouchableOpacity 
-          onPress={handleBack} 
-          style={styles.backButtonTop}
-          activeOpacity={0.7}
-        >
-          <Ionicons name="arrow-back" size={24} color={COLORS.primary} />
-        </TouchableOpacity>
-        
-        <ScrollView contentContainerStyle={styles.contentContainer}>
-          {workoutStarted && (
-            <View style={styles.timerContainer}>
-              <Text style={styles.timerLabel}>Workout Time</Text>
-              <Text style={styles.timerDisplay}>{formatTime(elapsedTime)}</Text>
-            </View>
-          )}
-        
-          <View style={styles.addExerciseContainer}>
-            <View style={styles.autocompleteContainer}>
-              <TextInput
-                style={styles.input}
-                placeholder="Enter exercise name"
-                value={newExerciseName}
-                onChangeText={handleExerciseNameChange}
-                onFocus={() => setShowSuggestions(newExerciseName.trim().length > 0)}
-              />
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 25}
+      >
+        <View style={[
+          styles.container,
+          Platform.OS === 'android' && { paddingTop: StatusBar.currentHeight || 0 }
+        ]} key={`workout-container-${forceRefreshKey}`}>
+          <TouchableOpacity 
+            onPress={handleBack} 
+            style={styles.backButtonTop}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="arrow-back" size={24} color={COLORS.primary} />
+          </TouchableOpacity>
+          
+          <ScrollView 
+            contentContainerStyle={styles.contentContainer}
+            keyboardShouldPersistTaps="handled"
+            onScrollBeginDrag={handleScroll}
+          >
+            {workoutStarted && (
+              <View style={styles.timerContainer}>
+                <Text style={styles.timerLabel}>Workout Time</Text>
+                <Text style={styles.timerDisplay}>{formatTime(elapsedTime)}</Text>
+              </View>
+            )}
+          
+            <View style={styles.addExerciseContainer}>
+              <View style={styles.autocompleteContainer}>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter exercise name"
+                  value={newExerciseName}
+                  onChangeText={handleExerciseNameChange}
+                  onFocus={() => setShowSuggestions(newExerciseName.trim().length > 0)}
+                  returnKeyType="done"
+                  onSubmitEditing={dismissKeyboard}
+                />
+                
+                {showSuggestions && suggestions.length > 0 && (
+                  <View style={styles.suggestionsContainer}>
+                    <FlatList
+                      data={suggestions}
+                      keyExtractor={(item) => item}
+                      renderItem={({ item }) => (
+                        <TouchableOpacity
+                          style={styles.suggestionItem}
+                          onPress={() => selectSuggestion(item)}
+                        >
+                          <Text>{item}</Text>
+                        </TouchableOpacity>
+                      )}
+                      style={styles.suggestionsList}
+                    />
+                  </View>
+                )}
+              </View>
               
-              {showSuggestions && suggestions.length > 0 && (
-                <View style={styles.suggestionsContainer}>
-                  <FlatList
-                    data={suggestions}
-                    keyExtractor={(item) => item}
-                    renderItem={({ item }) => (
-                      <TouchableOpacity
-                        style={styles.suggestionItem}
-                        onPress={() => selectSuggestion(item)}
-                      >
-                        <Text>{item}</Text>
-                      </TouchableOpacity>
-                    )}
-                    style={styles.suggestionsList}
-                  />
-                </View>
-              )}
+              <TouchableOpacity 
+                style={styles.addButton}
+                onPress={addExercise}
+              >
+                <Text style={styles.buttonText}>Add</Text>
+              </TouchableOpacity>
             </View>
             
-            <TouchableOpacity 
-              style={styles.addButton}
-              onPress={addExercise}
-            >
-              <Text style={styles.buttonText}>Add</Text>
-            </TouchableOpacity>
-          </View>
-          
-          {exercises.length === 0 && (
-            <View style={styles.emptyWorkoutContainer}>
-              <Ionicons name="barbell-outline" size={60} color={COLORS.primaryLight} />
-              <Text style={styles.emptyWorkoutText}>
-                Your workout is empty. Add exercises to get started.
-              </Text>
+            {exercises.length === 0 && (
+              <View style={styles.emptyWorkoutContainer}>
+                <Ionicons name="barbell-outline" size={60} color={COLORS.primaryLight} />
+                <Text style={styles.emptyWorkoutText}>
+                  Your workout is empty. Add exercises to get started.
+                </Text>
+              </View>
+            )}
+            
+            <View style={styles.exercisesContainer}>
+              {exercises.map((exercise, exerciseIndex) => (
+                <ExerciseItem 
+                  key={exercise.id}
+                  exercise={exercise}
+                  exerciseIndex={exerciseIndex}
+                  deleteExercise={deleteExercise}
+                  addSet={addSet}
+                  deleteSet={deleteSet}
+                  updateWeight={updateWeight}
+                  updateReps={updateReps}
+                  toggleSetCompletion={toggleSetCompletion}
+                  handleSwipeableRef={handleSwipeableRef}
+                  moveExerciseUp={moveExerciseUp}
+                  moveExerciseDown={moveExerciseDown}
+                  isFirst={exerciseIndex === 0}
+                  isLast={exerciseIndex === exercises.length - 1}
+                  onViewHistory={showExerciseHistory}
+                  dismissKeyboard={dismissKeyboard}
+                  startRestTimer={startRestTimer}
+                />
+              ))}
             </View>
-          )}
-          
-          <View style={styles.exercisesContainer}>
-            {exercises.map((exercise, exerciseIndex) => (
-              <ExerciseItem 
-                key={exercise.id}
-                exercise={exercise}
-                exerciseIndex={exerciseIndex}
-                deleteExercise={deleteExercise}
-                addSet={addSet}
-                deleteSet={deleteSet}
-                updateWeight={updateWeight}
-                updateReps={updateReps}
-                toggleSetCompletion={toggleSetCompletion}
-                handleSwipeableRef={handleSwipeableRef}
-                moveExerciseUp={moveExerciseUp}
-                moveExerciseDown={moveExerciseDown}
-                isFirst={exerciseIndex === 0}
-                isLast={exerciseIndex === exercises.length - 1}
-                onViewHistory={showExerciseHistory}
-              />
-            ))}
-          </View>
-          
-          {exercises.length > 0 && (
-            <View style={styles.actionContainer}>
-              <TouchableOpacity
-                style={styles.completeButton}
-                onPress={handleSaveWorkout}
-                disabled={saving}
-              >
-                {saving ? (
-                  <ActivityIndicator color="white" />
-                ) : (
-                  <Text style={styles.buttonText}>Complete Workout</Text>
-                )}
-              </TouchableOpacity>
-              
-              <TouchableOpacity
-                style={styles.cancelButton}
-                onPress={handleCancelWorkout}
-              >
-                <Text style={styles.cancelButtonText}>Cancel Workout</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-        </ScrollView>
-      </View>
+            
+            {exercises.length > 0 && (
+              <View style={styles.actionContainer}>
+                <TouchableOpacity
+                  style={styles.completeButton}
+                  onPress={handleSaveWorkout}
+                  disabled={saving}
+                >
+                  {saving ? (
+                    <ActivityIndicator color="white" />
+                  ) : (
+                    <Text style={styles.buttonText}>Complete Workout</Text>
+                  )}
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={styles.cancelButton}
+                  onPress={handleCancelWorkout}
+                >
+                  <Text style={styles.cancelButtonText}>Cancel Workout</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </ScrollView>
+        </View>
+      </KeyboardAvoidingView>
+      
+      <RestTimer />
       
       {/* Cancel workout confirmation modal */}
       <Modal
@@ -1469,8 +1621,8 @@ export default function WorkoutScreen() {
                                   paddingVertical: 8,
                                 }}>
                                   <Text style={{flex: 0.5, textAlign: 'center'}}>{setIndex + 1}</Text>
-                                  <Text style={{flex: 1, textAlign: 'center'}}>{set.weight} {workout.weightUnit || weightUnit}</Text>
-                                  <Text style={{flex: 1, textAlign: 'center'}}>{set.reps}</Text>
+                                  <Text style={{flex: 1, textAlign: 'center'}}>{set.weight || '0'} {workout.weightUnit || weightUnit}</Text>
+                                  <Text style={{flex: 1, textAlign: 'center'}}>{set.reps || '0'}</Text>
                                   <Text style={{flex: 1, textAlign: 'center'}}>{volume.toFixed(0)}</Text>
                                 </View>
                               );
@@ -2070,5 +2222,50 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     color: COLORS.primary,
+  },
+  restTimerContainer: {
+    position: 'absolute',
+    bottom: 20,
+    left: 20,
+    right: 20,
+    backgroundColor: COLORS.card,
+    borderRadius: 12,
+    padding: 15,
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  restTimerContent: {
+    alignItems: 'center',
+  },
+  restTimerLabel: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    marginBottom: 5,
+  },
+  restTimerValue: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: COLORS.text,
+    marginBottom: 10,
+  },
+  restTimerControls: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    width: '100%',
+  },
+  restTimerButton: {
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  restTimerButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
   },
 }); 

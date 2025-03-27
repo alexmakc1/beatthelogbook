@@ -11,12 +11,14 @@ import {
   SafeAreaView,
   TextInput,
   Dimensions,
+  ScrollView,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as nicotineService from '../../../services/nicotineService';
 import { COLORS } from '../../../services/colors';
 import { format, addDays, subDays, isToday, isSameDay } from 'date-fns';
+import UsageBarChart from './components/UsageBarChart';
 
 const CIRCLE_SIZE = 120;
 const CIRCLE_STROKE_WIDTH = 12;
@@ -32,6 +34,14 @@ export default function NicotineScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [amount, setAmount] = useState('3');
   const [selectedDate, setSelectedDate] = useState(new Date());
+  const [usageData, setUsageData] = useState<{
+    date: string;
+    total: number;
+    count: number;
+  }[]>([]);
+  const [chartPeriod, setChartPeriod] = useState<7 | 30>(7);
+  const [loadingChart, setLoadingChart] = useState(false);
+  const [activeView, setActiveView] = useState<'chart' | 'history'>('chart');
 
   const loadData = async () => {
     try {
@@ -44,6 +54,9 @@ export default function NicotineScreen() {
       setEntries(entriesData);
       setStats(statsData);
       setSettings(settingsData);
+      
+      // Also refresh chart data
+      loadUsageData();
     } catch (error) {
       console.error('Error loading nicotine data:', error);
       Alert.alert('Error', 'Failed to load nicotine data');
@@ -53,9 +66,31 @@ export default function NicotineScreen() {
     }
   };
 
+  const loadUsageData = async () => {
+    try {
+      setLoadingChart(true);
+      const data = await nicotineService.getDailyUsageData(chartPeriod);
+      setUsageData(data);
+    } catch (error) {
+      console.error('Error loading usage data:', error);
+    } finally {
+      setLoadingChart(false);
+    }
+  };
+
   useEffect(() => {
     loadData();
   }, [selectedDate]);
+
+  useEffect(() => {
+    loadUsageData();
+  }, [chartPeriod]);
+
+  useEffect(() => {
+    if (entries.length > 0 && selectedDate && isToday(selectedDate)) {
+      setActiveView('history');
+    }
+  }, [entries, selectedDate]);
 
   const handleAddEntry = async () => {
     try {
@@ -112,22 +147,32 @@ export default function NicotineScreen() {
     });
   };
 
-  const renderEntry = ({ item }: { item: nicotineService.NicotineEntry }) => (
-    <View style={styles.entryItem}>
-      <View style={styles.entryInfo}>
-        <Text style={styles.entryAmount}>{item.amount} mg</Text>
-        <Text style={styles.entryTime}>
-          {format(new Date(item.timestamp), 'h:mm a')}
-        </Text>
+  const renderEntry = ({ item }: { item: nicotineService.NicotineEntry }) => {
+    const formattedTime = format(new Date(item.timestamp), 'h:mm a');
+    const dailyPercentage = settings?.dailyGoal ? ((item.amount / settings.dailyGoal) * 100).toFixed(1) : '0';
+
+    return (
+      <View style={styles.entryItem}>
+        <View style={styles.entryInfo}>
+          <View style={styles.entryHeader}>
+            <Text style={styles.entryAmount}>{item.amount} mg</Text>
+            <Text style={styles.entryTime}>{formattedTime}</Text>
+          </View>
+          <View style={styles.entryDetails}>
+            <Text style={styles.entryDetail}>
+              {dailyPercentage}% of daily goal
+            </Text>
+          </View>
+        </View>
+        <TouchableOpacity
+          onPress={() => handleDeleteEntry(item.id)}
+          style={styles.deleteButton}
+        >
+          <Ionicons name="trash-outline" size={20} color={COLORS.error} />
+        </TouchableOpacity>
       </View>
-      <TouchableOpacity
-        onPress={() => handleDeleteEntry(item.id)}
-        style={styles.deleteButton}
-      >
-        <Ionicons name="trash-outline" size={20} color={COLORS.error} />
-      </TouchableOpacity>
-    </View>
-  );
+    );
+  };
 
   const calculateProgress = () => {
     if (!settings) return 0;
@@ -186,85 +231,197 @@ export default function NicotineScreen() {
         </TouchableOpacity>
       </View>
 
-      <View style={styles.progressContainer}>
-        <View style={styles.circleContainer}>
-          <View style={styles.circleBackground}>
-            <View style={[
-              styles.circleProgress,
-              {
-                backgroundColor: progressColor,
-                transform: [{ scale: progress }],
-              }
-            ]} />
-            <View style={styles.circleTextContainer}>
-              <Text style={styles.circleValue}>
+      <ScrollView 
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.progressContainer}>
+          <View style={styles.circleContainer}>
+            <View style={styles.circleBackground}>
+              <View style={[
+                styles.circleProgress,
+                {
+                  backgroundColor: progressColor,
+                  transform: [{ scale: progress }],
+                }
+              ]} />
+              <View style={styles.circleTextContainer}>
+                <Text style={styles.circleValue}>
+                  {settings?.trackingMode === 'mg'
+                    ? `${stats?.todayTotal || 0}`
+                    : `${entries.length}`}
+                </Text>
+                <Text style={styles.circleLabel}>
+                  {settings?.trackingMode === 'mg' ? 'mg' : 'times'}
+                </Text>
+              </View>
+            </View>
+          </View>
+          <View style={styles.statsContainer}>
+            <View style={styles.statCard}>
+              <Text style={styles.statLabel}>Today's Usage</Text>
+              <Text style={styles.statValue}>{stats?.todayTotal || 0} mg</Text>
+              <Text style={styles.statSubValue}>{entries.length} times</Text>
+            </View>
+            <View style={styles.statCard}>
+              <Text style={styles.statLabel}>Daily Goal</Text>
+              <Text style={styles.statValue}>
                 {settings?.trackingMode === 'mg'
-                  ? `${stats?.todayTotal || 0}`
-                  : `${entries.length}`}
+                  ? `${settings?.dailyGoal || 0} mg`
+                  : `${settings?.dailyGoal || 0} times`}
               </Text>
-              <Text style={styles.circleLabel}>
-                {settings?.trackingMode === 'mg' ? 'mg' : 'times'}
+              <Text style={styles.statSubValue}>
+                {settings?.trackingMode === 'mg'
+                  ? `${Math.round((settings?.dailyGoal || 0) / (settings?.defaultAmount || 1))} times`
+                  : `${Math.round((settings?.dailyGoal || 0) * (settings?.defaultAmount || 1))} mg`}
               </Text>
             </View>
           </View>
         </View>
-        <View style={styles.statsContainer}>
-          <View style={styles.statCard}>
-            <Text style={styles.statLabel}>Today's Usage</Text>
-            <Text style={styles.statValue}>{stats?.todayTotal || 0} mg</Text>
-            <Text style={styles.statSubValue}>{entries.length} times</Text>
-          </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statLabel}>Daily Goal</Text>
-            <Text style={styles.statValue}>
-              {settings?.trackingMode === 'mg'
-                ? `${settings?.dailyGoal || 0} mg`
-                : `${settings?.dailyGoal || 0} times`}
-            </Text>
-            <Text style={styles.statSubValue}>
-              {settings?.trackingMode === 'mg'
-                ? `${Math.round((settings?.dailyGoal || 0) / (settings?.defaultAmount || 1))} times`
-                : `${Math.round((settings?.dailyGoal || 0) * (settings?.defaultAmount || 1))} mg`}
-            </Text>
-          </View>
-        </View>
-      </View>
 
-      {isToday(selectedDate) && (
-        <View style={styles.inputContainer}>
-          <TextInput
-            style={styles.input}
-            value={amount}
-            onChangeText={setAmount}
-            keyboardType="numeric"
-            placeholder="Amount (mg)"
-            placeholderTextColor={COLORS.textSecondary}
-          />
+        {isToday(selectedDate) && (
+          <View style={styles.inputContainer}>
+            <TextInput
+              style={styles.input}
+              value={amount}
+              onChangeText={setAmount}
+              keyboardType="numeric"
+              placeholder="Amount (mg)"
+              placeholderTextColor={COLORS.textSecondary}
+            />
+            <TouchableOpacity
+              style={styles.addButton}
+              onPress={handleAddEntry}
+            >
+              <Text style={styles.addButtonText}>Add Entry</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        <View style={styles.viewToggleContainer}>
           <TouchableOpacity
-            style={styles.addButton}
-            onPress={handleAddEntry}
+            style={[
+              styles.viewToggleButton,
+              activeView === 'chart' && styles.viewToggleButtonActive,
+            ]}
+            onPress={() => setActiveView('chart')}
           >
-            <Text style={styles.addButtonText}>Add Entry</Text>
+            <Ionicons
+              name="bar-chart-outline"
+              size={18}
+              color={activeView === 'chart' ? '#fff' : COLORS.text}
+              style={{ marginRight: 6 }}
+            />
+            <Text
+              style={[
+                styles.viewToggleButtonText,
+                activeView === 'chart' && styles.viewToggleButtonTextActive,
+              ]}
+            >
+              Chart
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.viewToggleButton,
+              activeView === 'history' && styles.viewToggleButtonActive,
+            ]}
+            onPress={() => setActiveView('history')}
+          >
+            <Ionicons
+              name="list-outline"
+              size={18}
+              color={activeView === 'history' ? '#fff' : COLORS.text}
+              style={{ marginRight: 6 }}
+            />
+            <Text
+              style={[
+                styles.viewToggleButtonText,
+                activeView === 'history' && styles.viewToggleButtonTextActive,
+              ]}
+            >
+              History
+            </Text>
           </TouchableOpacity>
         </View>
-      )}
 
-      <FlatList
-        data={entries}
-        renderItem={renderEntry}
-        keyExtractor={item => item.id}
-        contentContainerStyle={styles.list}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => {
-              setRefreshing(true);
-              loadData();
-            }}
-            colors={[COLORS.primary]}
-          />
-        }
-      />
+        {activeView === 'chart' && (
+          <View style={styles.chartContainer}>
+            <View style={styles.chartHeader}>
+              <Text style={styles.chartTitle}>Usage Trend</Text>
+              <View style={styles.chartPeriodToggle}>
+                <TouchableOpacity
+                  style={[
+                    styles.periodButton,
+                    chartPeriod === 7 && styles.periodButtonActive,
+                  ]}
+                  onPress={() => setChartPeriod(7)}
+                >
+                  <Text
+                    style={[
+                      styles.periodButtonText,
+                      chartPeriod === 7 && styles.periodButtonTextActive,
+                    ]}
+                  >
+                    7 Days
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.periodButton,
+                    chartPeriod === 30 && styles.periodButtonActive,
+                  ]}
+                  onPress={() => setChartPeriod(30)}
+                >
+                  <Text
+                    style={[
+                      styles.periodButtonText,
+                      chartPeriod === 30 && styles.periodButtonTextActive,
+                    ]}
+                  >
+                    30 Days
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+            {loadingChart ? (
+              <View style={styles.chartLoading}>
+                <ActivityIndicator size="small" color={COLORS.primary} />
+              </View>
+            ) : (
+              <UsageBarChart
+                data={usageData}
+                trackingMode={settings?.trackingMode || 'mg'}
+                dailyGoal={settings?.dailyGoal || 0}
+              />
+            )}
+          </View>
+        )}
+
+        {activeView === 'history' && (
+          <View style={styles.entriesContainer}>
+            <Text style={styles.sectionTitle}>Today's Entries</Text>
+            {entries.length === 0 ? (
+              <View style={styles.emptyEntriesContainer}>
+                <Text style={styles.emptyEntriesText}>
+                  No entries for {isToday(selectedDate) ? 'today' : format(selectedDate, 'MMM d, yyyy')}
+                </Text>
+              </View>
+            ) : (
+              <FlatList
+                data={entries}
+                renderItem={renderEntry}
+                keyExtractor={(item) => item.id}
+                contentContainerStyle={styles.entriesList}
+                refreshControl={
+                  <RefreshControl refreshing={refreshing} onRefresh={loadData} />
+                }
+                nestedScrollEnabled={true}
+              />
+            )}
+          </View>
+        )}
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -409,8 +566,118 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
-  list: {
-    padding: 16,
+  viewToggleContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginTop: 20,
+    marginHorizontal: 15,
+  },
+  viewToggleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.card,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    marginHorizontal: 5,
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  viewToggleButtonActive: {
+    backgroundColor: COLORS.primary,
+  },
+  viewToggleButtonText: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: COLORS.text,
+  },
+  viewToggleButtonTextActive: {
+    color: '#fff',
+  },
+  chartContainer: {
+    marginTop: 20,
+    backgroundColor: COLORS.card,
+    borderRadius: 8,
+    padding: 15,
+    marginHorizontal: 15,
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
+    maxHeight: '65%',
+  },
+  chartHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  chartTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: COLORS.text,
+  },
+  chartPeriodToggle: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(0, 0, 0, 0.05)',
+    borderRadius: 6,
+    padding: 2,
+  },
+  periodButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 4,
+  },
+  periodButtonActive: {
+    backgroundColor: COLORS.primary,
+  },
+  periodButtonText: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+  },
+  periodButtonTextActive: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  chartLoading: {
+    height: 180,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  entriesContainer: {
+    flex: 1,
+    marginTop: 20,
+    marginHorizontal: 15,
+    backgroundColor: COLORS.card,
+    borderRadius: 8,
+    padding: 15,
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
+    maxHeight: '65%',
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: COLORS.text,
+    marginBottom: 10,
+  },
+  emptyEntriesContainer: {
+    padding: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyEntriesText: {
+    color: COLORS.textSecondary,
+  },
+  entriesList: {
+    flexGrow: 1,
   },
   entryItem: {
     flexDirection: 'row',
@@ -424,6 +691,18 @@ const styles = StyleSheet.create({
   entryInfo: {
     flex: 1,
   },
+  entryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  entryDetails: {
+    marginTop: 5,
+  },
+  entryDetail: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+  },
   entryAmount: {
     fontSize: 16,
     fontWeight: 'bold',
@@ -436,5 +715,8 @@ const styles = StyleSheet.create({
   },
   deleteButton: {
     padding: 8,
+  },
+  scrollContent: {
+    paddingBottom: 20,
   },
 }); 
