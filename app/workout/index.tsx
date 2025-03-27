@@ -13,7 +13,8 @@ import {
   Modal,
   AppState,
   Platform,
-  BackHandler
+  BackHandler,
+  StatusBar
 } from 'react-native';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import * as storageService from '../../services/storageService';
@@ -98,7 +99,7 @@ const ExerciseItem = React.memo(({
   exercise: Exercise;
   exerciseIndex: number;
   deleteExercise: (id: string) => void;
-  addSet: (exerciseId: string) => void;
+  addSet: (exerciseId: string) => Promise<void>;
   deleteSet: (exerciseId: string, setId: string) => void;
   updateWeight: (exerciseId: string, setId: string, weight: string) => void;
   updateReps: (exerciseId: string, setId: string, reps: string) => void;
@@ -148,6 +149,7 @@ const ExerciseItem = React.memo(({
               value={set.weight}
               onChangeText={(text) => updateWeight(exercise.id, set.id, text)}
               editable={!isCompleted}
+              selectTextOnFocus={true}
             />
             <TextInput
               style={[
@@ -160,6 +162,7 @@ const ExerciseItem = React.memo(({
               value={set.reps}
               onChangeText={(text) => updateReps(exercise.id, set.id, text)}
               editable={!isCompleted}
+              selectTextOnFocus={true}
             />
             <TouchableOpacity
               style={[
@@ -234,7 +237,11 @@ const ExerciseItem = React.memo(({
       
       <TouchableOpacity 
         style={styles.addSetButton}
-        onPress={() => addSet(exercise.id)}
+        onPress={() => {
+          addSet(exercise.id).catch(error => 
+            console.error(`Error adding set to ${exercise.name}:`, error)
+          );
+        }}
       >
         <Text style={styles.buttonText}>Add Set</Text>
       </TouchableOpacity>
@@ -541,28 +548,83 @@ export default function WorkoutScreen() {
         try {
           const templateExercises = JSON.parse(params.exercises);
           
-          // For each exercise in the template, get its most recent data
+          // For each exercise in the template, populate with best sets
           const populatedExercises = await Promise.all(
             templateExercises.map(async (exercise: Exercise) => {
-              const recentData = await storageService.getMostRecentExerciseData(exercise.name);
-              if (recentData) {
-                // If we have recent data, update the first set
-                if (exercise.sets.length > 0) {
-                  exercise.sets[0] = {
-                    ...exercise.sets[0],
-                    reps: recentData.reps,
-                    weight: recentData.weight
-                  };
-                } else {
-                  // If no sets exist, create one with the recent data
-                  exercise.sets = [{
+              // First try to get best performance data
+              const bestPerformance = await storageService.getBestPerformance(exercise.name, historyDays);
+              
+              // Create new sets array to replace template's empty sets
+              const newSets: SetWithCompletion[] = [];
+              
+              if (bestPerformance && bestPerformance.allSets && bestPerformance.allSets.length > 0) {
+                // Use best sets data to populate exercise sets
+                console.log(`Using best sets data for template exercise: ${exercise.name}`);
+                
+                // Take the number of sets from template, or use all best sets if template had no sets
+                const setsToCreate = Math.max(exercise.sets.length, bestPerformance.allSets.length);
+                
+                // Create each set from best performance data
+                for (let i = 0; i < setsToCreate; i++) {
+                  if (i < bestPerformance.allSets.length) {
+                    // If we have data for this set in best performance, use it
+                    const bestSet = bestPerformance.allSets[i];
+                    newSets.push({
+                      id: generateId(),
+                      reps: bestSet.reps,
+                      weight: bestSet.weight,
+                      completed: false
+                    });
+                  } else {
+                    // Otherwise add an empty set
+                    newSets.push({
+                      id: generateId(),
+                      reps: '',
+                      weight: '',
+                      completed: false
+                    });
+                  }
+                }
+              } else {
+                // Fall back to most recent data if no best performance
+                const recentData = await storageService.getMostRecentExerciseData(exercise.name);
+                
+                if (recentData) {
+                  // If we have at least some recent data, use it for the first set
+                  newSets.push({
                     id: generateId(),
                     reps: recentData.reps,
-                    weight: recentData.weight
-                  }];
+                    weight: recentData.weight,
+                    completed: false
+                  });
+                  
+                  // Add remaining empty sets if template had more than one
+                  for (let i = 1; i < exercise.sets.length; i++) {
+                    newSets.push({
+                      id: generateId(),
+                      reps: '',
+                      weight: '',
+                      completed: false
+                    });
+                  }
+                } else {
+                  // If no data at all, create empty sets based on template
+                  for (let i = 0; i < Math.max(1, exercise.sets.length); i++) {
+                    newSets.push({
+                      id: generateId(),
+                      reps: '',
+                      weight: '',
+                      completed: false
+                    });
+                  }
                 }
               }
-              return exercise;
+              
+              // Return updated exercise with populated sets
+              return {
+                ...exercise,
+                sets: newSets
+              };
             })
           );
           
@@ -574,7 +636,7 @@ export default function WorkoutScreen() {
     };
 
     loadTemplateExercises();
-  }, [params.exercises]);
+  }, [params.exercises, historyDays]);
 
   // Handle exercise name input changes
   const handleExerciseNameChange = (text: string) => {
@@ -592,37 +654,114 @@ export default function WorkoutScreen() {
   const addExercise = async () => {
     if (!newExerciseName.trim()) return;
     
-    // Get the most recent data for this exercise
-    const recentData = await storageService.getMostRecentExerciseData(newExerciseName);
+    // Try to get the best performance data for this exercise
+    const bestPerformance = await storageService.getBestPerformance(newExerciseName, historyDays);
     
+    // Initialize new exercise
     const newExercise: Exercise = {
       id: generateId(),
       name: newExerciseName,
-      sets: recentData ? [{
-        id: generateId(),
-        reps: recentData.reps,
-        weight: recentData.weight
-      }] : []
+      sets: []
     };
+    
+    // If we have best performance data, use the first set
+    if (bestPerformance && bestPerformance.allSets && bestPerformance.allSets.length > 0) {
+      const bestSet = bestPerformance.allSets[0];
+      if (bestSet) {
+        console.log(`Using best set data for new exercise: ${bestSet.weight}x${bestSet.reps}`);
+        newExercise.sets.push({
+          id: generateId(),
+          reps: bestSet.reps,
+          weight: bestSet.weight,
+          completed: false
+        });
+      }
+    } else {
+      // Fall back to getting most recent data if best performance isn't available
+      const recentData = await storageService.getMostRecentExerciseData(newExerciseName);
+      if (recentData) {
+        newExercise.sets.push({
+          id: generateId(),
+          reps: recentData.reps,
+          weight: recentData.weight,
+          completed: false
+        });
+      }
+    }
+    
+    // If we still have no sets, add an empty one
+    if (newExercise.sets.length === 0) {
+      newExercise.sets.push({
+        id: generateId(),
+        reps: '',
+        weight: '',
+        completed: false
+      });
+    }
     
     setExercises(prev => [...prev, newExercise]);
     setNewExerciseName('');
     setShowSuggestions(false);
   };
 
-  // Add a new set to an exercise
-  const addSet = (exerciseId: string) => {
-    setExercises(exercises.map(exercise => 
-      exercise.id === exerciseId 
-        ? {
-            ...exercise,
-            sets: [
-              ...exercise.sets,
-              { id: generateId(), reps: '', weight: '', completed: false }
-            ]
-          }
-        : exercise
-    ));
+  // Add a new set to an exercise with data from best set if available
+  const addSet = async (exerciseId: string) => {
+    try {
+      // Find the exercise we're adding a set to
+      const exercise = exercises.find(ex => ex.id === exerciseId);
+      if (!exercise) return;
+      
+      // Get the current set count - we'll use this to determine which set from best performance to use
+      const currentSetCount = exercise.sets.length;
+      
+      // Get the best performance data for this exercise
+      const bestPerformance = await storageService.getBestPerformance(exercise.name, historyDays);
+      
+      // Create a new set
+      let newSet: SetWithCompletion = {
+        id: generateId(),
+        reps: '',
+        weight: '',
+        completed: false
+      };
+      
+      // If we have best performance data and it has enough sets, copy the data
+      if (bestPerformance && bestPerformance.allSets && bestPerformance.allSets.length > currentSetCount) {
+        const bestSet = bestPerformance.allSets[currentSetCount];
+        if (bestSet) {
+          console.log(`Using best set data for set ${currentSetCount + 1}: ${bestSet.weight}x${bestSet.reps}`);
+          newSet.weight = bestSet.weight;
+          newSet.reps = bestSet.reps;
+        }
+      }
+      
+      // Update exercises state
+      setExercises(exercises.map(exercise => 
+        exercise.id === exerciseId 
+          ? {
+              ...exercise,
+              sets: [
+                ...exercise.sets,
+                newSet
+              ]
+            }
+          : exercise
+      ));
+    } catch (error) {
+      console.error('Error adding set with best data:', error);
+      // Fall back to adding an empty set
+      setExercises(exercises.map(exercise => 
+        exercise.id === exerciseId 
+          ? {
+              ...exercise,
+              sets: [
+                ...exercise.sets,
+                { id: generateId(), reps: '', weight: '', completed: false }
+              ]
+            }
+          : exercise
+      ));
+    }
   };
 
   // Update the reps for a set
@@ -687,7 +826,7 @@ export default function WorkoutScreen() {
     };
   }, []);
 
-  // Handle workflow cancel with confirmation
+  // Handle cancel button press
   const handleCancelWorkout = () => {
     setShowCancelModal(true);
   };
@@ -867,13 +1006,53 @@ export default function WorkoutScreen() {
     swipeableRefs.current[swipeableIndex] = ref;
   }, []);
 
+  // Add a function to save workout progress and exit without completing
+  const saveAndExit = async () => {
+    try {
+      // Current workout is already being saved automatically when exercises change
+      // So we just need to navigate back
+      router.replace("/");
+    } catch (error) {
+      console.error('Error saving workout:', error);
+      Alert.alert('Error', 'Failed to save workout progress');
+    }
+  };
+
   // Add the function to handle going back to the main screen
   const handleBack = () => {
-    // If there's an active workout, confirm before navigating away
+    console.log('Back button pressed, exercises:', exercises.length);
+    
+    // If there's an active workout, show options
     if (exercises.length > 0) {
-      setShowCancelModal(true);
+      console.log('Showing workout options');
+      Alert.alert(
+        'Workout in Progress',
+        'What would you like to do?',
+        [
+          {
+            text: 'Save & Exit',
+            style: 'default',
+            onPress: saveAndExit
+          },
+          {
+            text: 'Complete Workout',
+            style: 'default',
+            onPress: handleSaveWorkout
+          },
+          {
+            text: 'Cancel Workout',
+            style: 'destructive',
+            onPress: () => setShowCancelModal(true)
+          },
+          {
+            text: 'Continue Workout',
+            style: 'cancel'
+          },
+        ]
+      );
     } else {
-      router.back();
+      console.log('No exercises, navigating to home');
+      router.replace("/");
     }
   };
 
@@ -950,60 +1129,66 @@ export default function WorkoutScreen() {
 
   return (
     <>
-      <View style={styles.container} key={`workout-container-${forceRefreshKey}`}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={handleBack} style={styles.backButton}>
-            <Ionicons name="arrow-back" size={24} color={COLORS.primary} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Workout</Text>
-          <View style={styles.headerRight} />
-        </View>
+      <StatusBar 
+        barStyle="dark-content" 
+        backgroundColor="#fff"
+        translucent={Platform.OS === 'android'}
+      />
+      <View style={[
+        styles.container,
+        Platform.OS === 'android' && { paddingTop: StatusBar.currentHeight || 0 }
+      ]} key={`workout-container-${forceRefreshKey}`}>
+        <TouchableOpacity 
+          onPress={handleBack} 
+          style={styles.backButtonTop}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="arrow-back" size={24} color={COLORS.primary} />
+        </TouchableOpacity>
         
         <ScrollView contentContainerStyle={styles.contentContainer}>
-          <View style={styles.topSection}>
-            {workoutStarted && (
-              <View style={styles.timerContainer}>
-                <Text style={styles.timerLabel}>Workout Time</Text>
-                <Text style={styles.timerDisplay}>{formatTime(elapsedTime)}</Text>
-              </View>
-            )}
-          
-            <View style={styles.addExerciseContainer}>
-              <View style={styles.autocompleteContainer}>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Enter exercise name"
-                  value={newExerciseName}
-                  onChangeText={handleExerciseNameChange}
-                  onFocus={() => setShowSuggestions(newExerciseName.trim().length > 0)}
-                />
-                
-                {showSuggestions && suggestions.length > 0 && (
-                  <View style={styles.suggestionsContainer}>
-                    <FlatList
-                      data={suggestions}
-                      keyExtractor={(item) => item}
-                      renderItem={({ item }) => (
-                        <TouchableOpacity
-                          style={styles.suggestionItem}
-                          onPress={() => selectSuggestion(item)}
-                        >
-                          <Text>{item}</Text>
-                        </TouchableOpacity>
-                      )}
-                      style={styles.suggestionsList}
-                    />
-                  </View>
-                )}
-              </View>
-              
-              <TouchableOpacity 
-                style={styles.addButton}
-                onPress={addExercise}
-              >
-                <Text style={styles.buttonText}>Add</Text>
-              </TouchableOpacity>
+          {workoutStarted && (
+            <View style={styles.timerContainer}>
+              <Text style={styles.timerLabel}>Workout Time</Text>
+              <Text style={styles.timerDisplay}>{formatTime(elapsedTime)}</Text>
             </View>
+          )}
+        
+          <View style={styles.addExerciseContainer}>
+            <View style={styles.autocompleteContainer}>
+              <TextInput
+                style={styles.input}
+                placeholder="Enter exercise name"
+                value={newExerciseName}
+                onChangeText={handleExerciseNameChange}
+                onFocus={() => setShowSuggestions(newExerciseName.trim().length > 0)}
+              />
+              
+              {showSuggestions && suggestions.length > 0 && (
+                <View style={styles.suggestionsContainer}>
+                  <FlatList
+                    data={suggestions}
+                    keyExtractor={(item) => item}
+                    renderItem={({ item }) => (
+                      <TouchableOpacity
+                        style={styles.suggestionItem}
+                        onPress={() => selectSuggestion(item)}
+                      >
+                        <Text>{item}</Text>
+                      </TouchableOpacity>
+                    )}
+                    style={styles.suggestionsList}
+                  />
+                </View>
+              )}
+            </View>
+            
+            <TouchableOpacity 
+              style={styles.addButton}
+              onPress={addExercise}
+            >
+              <Text style={styles.buttonText}>Add</Text>
+            </TouchableOpacity>
           </View>
           
           {exercises.length === 0 && (
@@ -1061,6 +1246,41 @@ export default function WorkoutScreen() {
           )}
         </ScrollView>
       </View>
+      
+      {/* Cancel workout confirmation modal */}
+      <Modal
+        visible={showCancelModal}
+        transparent={true}
+        animationType="fade"
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <Text style={{fontSize: 18, fontWeight: 'bold', marginBottom: 15}}>Cancel Workout</Text>
+            <Text style={{marginBottom: 20}}>Are you sure you want to cancel this workout? All progress will be lost.</Text>
+            
+            <View style={{flexDirection: 'row', justifyContent: 'flex-end'}}>
+              <TouchableOpacity 
+                style={{padding: 10, marginRight: 15}}
+                onPress={() => setShowCancelModal(false)}
+              >
+                <Text style={{color: COLORS.primary}}>No, Keep Working Out</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={{
+                  backgroundColor: COLORS.error,
+                  paddingVertical: 10,
+                  paddingHorizontal: 15,
+                  borderRadius: 5
+                }}
+                onPress={confirmCancelWorkout}
+              >
+                <Text style={{color: '#fff'}}>Yes, Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
       
       {/* Exercise history modal */}
       {showHistoryModal && (
@@ -1424,15 +1644,14 @@ const styles = StyleSheet.create({
   },
   contentContainer: {
     padding: 12,
-    paddingTop: 4,
-  },
-  topSection: {
-    marginBottom: 10,
+    paddingTop: Platform.OS === 'ios' ? 60 : StatusBar.currentHeight ? StatusBar.currentHeight + 50 : 60,
+    paddingBottom: 40,
   },
   timerContainer: {
     backgroundColor: COLORS.primaryLight,
     borderRadius: 8,
     padding: 10,
+    marginTop: 0,
     marginBottom: 12,
     alignItems: 'center',
     borderWidth: 1,
@@ -1687,29 +1906,23 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     borderColor: 'rgba(200, 200, 200, 0.5)',
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: Platform.OS === 'ios' ? 50 : 16,
-    paddingBottom: 8,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-    zIndex: 10,
-  },
-  backButton: {
+  backButtonTop: {
     padding: 8,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    flex: 1,
-    textAlign: 'center',
-  },
-  headerRight: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 10 : StatusBar.currentHeight ? StatusBar.currentHeight + 2 : 2,
+    left: 16,
+    zIndex: 100,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    borderRadius: 20,
     width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 3,
   },
   historyButton: {
     backgroundColor: COLORS.primary,
@@ -1731,26 +1944,17 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
     justifyContent: 'center',
     alignItems: 'center',
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 9999,
   },
   modalContainer: {
-    backgroundColor: 'white',
+    backgroundColor: COLORS.card,
     borderRadius: 12,
-    width: '90%',
-    minHeight: 200,
+    width: '80%',
     padding: 20,
-    shadowColor: '#000',
+    shadowColor: COLORS.shadow,
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.5,
-    shadowRadius: 4,
-    elevation: 10,
-    borderWidth: 2,
-    borderColor: COLORS.primary,
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    elevation: 5,
   },
   modalHeader: {
     flexDirection: 'row',
